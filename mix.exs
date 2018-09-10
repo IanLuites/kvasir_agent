@@ -61,6 +61,7 @@ defmodule Kvasir.Agent.MixProject do
 
   defp deps do
     [
+      # {:kvasir, path: "../core", optional: true},
       {:ex_doc, ">= 0.0.0", only: :dev}
     ]
   end
