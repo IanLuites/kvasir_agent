@@ -12,14 +12,19 @@ defmodule Kvasir.Agent.Instance do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
 
     agent_state = cache.load(agent, id) || Map.put(agent.base(id), :offset, :earliest)
-    from = if is_integer(agent_state.offset), do: agent_state.offset + 1, else: agent_state.offset
+
+    {offset, from} =
+      if is_integer(agent_state.offset),
+        do: {agent_state.offset, agent_state.offset + 1},
+        else: {-1, agent_state.offset}
+
     agent_state = Map.delete(agent_state, :offset)
 
     {offset, agent_state} =
       topic
       |> client.stream(from: from, to: :last)
       |> Stream.filter(&(&1.__meta__.key == id))
-      |> Enum.reduce({from, agent_state}, fn event, {_offset, state} ->
+      |> Enum.reduce({offset, agent_state}, fn event, {_offset, state} ->
         with {:ok, updated_state} <- agent.apply(state, event) do
           {event.__meta__.offset, updated_state}
         end
@@ -66,10 +71,10 @@ defmodule Kvasir.Agent.Instance do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     offset = event.__meta__.offset
 
-    case state.offset <= offset && state.agent.apply(state.agent_state, event) do
+    case state.offset < offset && state.agent.apply(state.agent_state, event) do
       {:ok, updated_state} ->
         state.cache.save(state.agent, state.id, Map.put(updated_state, :offset, offset))
-        {:noreply, %{state | offset: offset + 1, agent_state: updated_state}}
+        {:noreply, %{state | offset: offset, agent_state: updated_state}}
 
       _ ->
         {:noreply, state}
