@@ -1,9 +1,17 @@
 defmodule Kvasir.Command do
-  defstruct [
-    :command,
-    __meta__: %__MODULE__.Meta{}
-  ]
+  @moduledoc ~S"""
+  """
 
+  @typedoc @moduledoc
+  @type t :: term
+
+  @callback __command__(atom) :: any
+  @callback create(any) :: {:ok, t} | {:error, atom}
+  @callback create!(any) :: {:ok, t} | {:error, atom}
+  @callback factory(any) :: {:ok, map} | {:error, atom}
+  @callback validate(t) :: :ok | {:error, atom}
+
+  @doc @moduledoc
   defmacro __using__(_opts \\ []) do
     quote do
       require Kvasir.Command
@@ -42,38 +50,56 @@ defmodule Kvasir.Command do
         defstruct @struct_fields ++ [__meta__: %Kvasir.Command.Meta{}]
       end
 
+      @behaviour Kvasir.Command
+
       @doc false
+      @impl Kvasir.Command
       def __command__(:instance), do: @command_instance
 
+      @doc ~S"""
+      Create this command.
+      """
+      @impl Kvasir.Command
       def create(data), do: Kvasir.Command.create(__MODULE__, data)
 
-      def validate(command), do: {:ok, command}
-      defoverridable validate: 1
+      @doc ~S"""
+      See: `create/1`.
+      """
+      @impl Kvasir.Command
+      def create!(data), do: Kvasir.Command.create!(__MODULE__, data)
+
+      @doc false
+      @impl Kvasir.Command
+      def factory(payload), do: {:ok, payload}
+
+      @doc false
+      @impl Kvasir.Command
+      def validate(command), do: :ok
+
+      defoverridable validate: 1, factory: 1
     end
   end
 
+  @doc ~S"""
+  Create a command by passing the command module and payload.
+  """
   def create(command, data) do
-    data =
-      Map.put(data, :__meta__, %Kvasir.Command.Meta{
-        id: generate_id(),
-        created: DateTime.utc_now()
-      })
+    meta = %Kvasir.Command.Meta{
+      created: DateTime.utc_now()
+    }
 
-    command
-    |> struct!(data)
-    |> command.validate()
+    with {:ok, payload} <- command.factory(data),
+         result <- struct!(command, Map.put(payload, :__meta__, meta)),
+         :ok <- command.validate(result) do
+      {:ok, result}
+    end
   end
 
-  @epoch_time "2018-09-01T00:00:00Z"
-              |> DateTime.from_iso8601()
-              |> elem(1)
-              |> DateTime.to_unix()
-              |> Kernel.*(1_000_000)
-
-  @spec generate_id :: non_neg_integer
-  defp generate_id do
-    micro = :os.system_time(:microsecond) - @epoch_time
-    random = :crypto.strong_rand_bytes(8)
-    Base.encode64(<<micro::integer-unsigned-64>> <> random, padding: false)
+  def create!(command, data) do
+    with {:ok, result} <- create(command, data) do
+      result
+    else
+      {:error, reason} -> raise "Failed to create #{command}, reason: #{reason}"
+    end
   end
 end

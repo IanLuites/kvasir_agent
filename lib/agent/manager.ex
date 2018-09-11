@@ -6,9 +6,9 @@ defmodule Kvasir.Agent.Manager do
     GenServer.start_link(__MODULE__, config, name: manager(config.agent))
   end
 
-  def dispatch(agent, command = %{id: id}) do
-    opts = []
-    timeout = opts[:timeout] || 5_000
+  def dispatch(agent, command) do
+    {:instance, id} = command.__meta__.scope
+    timeout = 5_000
 
     with :ok <- GenServer.call(manager(agent), {:command, id, command}) do
       ref = command.__meta__.id

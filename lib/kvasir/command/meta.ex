@@ -2,7 +2,8 @@ defmodule Kvasir.Command.Meta do
   defstruct [
     :id,
     :created,
-    :dispatched
+    :dispatched,
+    :scope
   ]
 
   defimpl Inspect do
