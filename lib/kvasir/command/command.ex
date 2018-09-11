@@ -41,10 +41,6 @@ defmodule Kvasir.Command do
 
       @behaviour Kvasir.Command
 
-      @doc false
-      @impl Kvasir.Command
-      def __command__(:instance), do: @command_instance
-
       @doc ~S"""
       Create this command.
       """

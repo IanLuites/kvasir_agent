@@ -2,7 +2,7 @@ defmodule Kvasir.Command.Dispatcher do
   @callback dispatch(Kvasir.Command.t(), Keyword.t()) :: any
   @callback do_dispatch(Kvasir.Command.t()) :: any
 
-  defmacro __using__(opts \\ []) do
+  defmacro __using__(_opts \\ []) do
     quote do
       @behaviour Kvasir.Command.Dispatcher
 
