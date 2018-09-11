@@ -25,30 +25,19 @@ defmodule Kvasir.Command do
     end
   end
 
-  defmacro instance(name) do
-    quote do
-      Module.put_attribute(__MODULE__, :command_instance, unquote(name))
-    end
-  end
-
   defmacro command(do: block) do
     quote do
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
-      Module.register_attribute(__MODULE__, :command_instance, accumulate: false)
 
       try do
-        import Kvasir.Command, only: [instance: 1, field: 1]
+        import Kvasir.Command, only: [field: 1]
         unquote(block)
       after
         :ok
       end
 
       @struct_fields Enum.reverse(@command_fields)
-      if @command_instance do
-        defstruct [@command_instance] ++ @struct_fields ++ [__meta__: %Kvasir.Command.Meta{}]
-      else
-        defstruct @struct_fields ++ [__meta__: %Kvasir.Command.Meta{}]
-      end
+      defstruct @struct_fields ++ [__meta__: %Kvasir.Command.Meta{}]
 
       @behaviour Kvasir.Command
 
