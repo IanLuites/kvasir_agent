@@ -41,6 +41,10 @@ defmodule Kvasir.Command do
 
       @behaviour Kvasir.Command
 
+      @doc false
+      @impl Kvasir.Command
+      def __command__(:fields), do: @struct_fields
+
       @doc ~S"""
       Create this command.
       """
