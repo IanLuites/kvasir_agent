@@ -8,10 +8,19 @@ defmodule Kvasir.Agent.Instance do
   end
 
   @impl GenServer
-  def init(state = %{client: client, agent: agent, id: id, cache: cache, topic: topic}) do
+  def init(
+        state = %{
+          client: client,
+          agent: agent,
+          id: id,
+          cache: cache,
+          topic: topic,
+          aggregate: aggregate
+        }
+      ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
 
-    agent_state = cache.load(agent, id) || Map.put(agent.base(id), :offset, :earliest)
+    agent_state = cache.load(agent, id) || Map.put(aggregate.base(id), :offset, :earliest)
 
     {offset, from} =
       if is_integer(agent_state.offset),
@@ -25,7 +34,7 @@ defmodule Kvasir.Agent.Instance do
       |> client.stream(from: from, to: :last)
       |> Stream.filter(&(&1.__meta__.key == id))
       |> Enum.reduce({offset, agent_state}, fn event, {_offset, state} ->
-        with {:ok, updated_state} <- agent.apply(state, event) do
+        with {:ok, updated_state} <- aggregate.apply(state, event) do
           {event.__meta__.offset, updated_state}
         end
       end)
@@ -40,7 +49,7 @@ defmodule Kvasir.Agent.Instance do
   @impl GenServer
   def handle_info(
         {:command, from, command},
-        state = %{agent: agent, agent_state: agent_state}
+        state = %{agent_state: agent_state, aggregate: aggregate}
       ) do
     pause_keep_alive(state)
     Logger.debug(fn -> "Agent<#{state.id}>: Command: #{inspect(command)}" end)
@@ -48,7 +57,7 @@ defmodule Kvasir.Agent.Instance do
     ref = command.__meta__.id
 
     response =
-      case agent.execute(agent_state, command) do
+      case aggregate.execute(agent_state, command) do
         {:ok, events} when is_list(events) ->
           commit_events(state, events, ref)
 
@@ -71,7 +80,7 @@ defmodule Kvasir.Agent.Instance do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     offset = event.__meta__.offset
 
-    case state.offset < offset && state.agent.apply(state.agent_state, event) do
+    case state.offset < offset && state.aggregate.apply(state.agent_state, event) do
       {:ok, updated_state} ->
         state.cache.save(state.agent, state.id, Map.put(updated_state, :offset, offset))
         {:noreply, %{state | offset: offset, agent_state: updated_state}}

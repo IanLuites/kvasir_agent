@@ -41,6 +41,7 @@ defmodule Kvasir.Agent.MixProject do
       licenses: ["MIT"],
       files: [
         # Elixir
+        "lib/kvasir",
         "lib/agent",
         "lib/agent.ex",
         "mix.exs",
