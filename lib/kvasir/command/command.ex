@@ -19,9 +19,9 @@ defmodule Kvasir.Command do
     end
   end
 
-  defmacro field(name) do
+  defmacro field(name, type \\ :string) do
     quote do
-      Module.put_attribute(__MODULE__, :command_fields, unquote(name))
+      Module.put_attribute(__MODULE__, :command_fields, {unquote(name), unquote(type)})
     end
   end
 
@@ -30,14 +30,14 @@ defmodule Kvasir.Command do
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
 
       try do
-        import Kvasir.Command, only: [field: 1]
+        import Kvasir.Command, only: [field: 1, field: 2]
         unquote(block)
       after
         :ok
       end
 
       @struct_fields Enum.reverse(@command_fields)
-      defstruct @struct_fields ++ [__meta__: %Kvasir.Command.Meta{}]
+      defstruct Enum.map(@struct_fields, &elem(&1, 0)) ++ [__meta__: %Kvasir.Command.Meta{}]
 
       @behaviour Kvasir.Command
 
@@ -66,6 +66,10 @@ defmodule Kvasir.Command do
       def validate(command), do: :ok
 
       defoverridable validate: 1, factory: 1
+
+      defimpl Jason.Encoder, for: __MODULE__ do
+        def encode(value, opts), do: Jason.Encode.map(Kvasir.Command.Encoder.encode(value), opts)
+      end
     end
   end
 
@@ -91,4 +95,6 @@ defmodule Kvasir.Command do
       {:error, reason} -> raise "Failed to create #{command}, reason: #{reason}"
     end
   end
+
+  defdelegate decode(value, meta \\ %Kvasir.Command.Meta{}), to: Kvasir.Command.Decoder
 end
