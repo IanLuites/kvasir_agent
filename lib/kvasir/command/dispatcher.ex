@@ -27,7 +27,7 @@ defmodule Kvasir.Command.Dispatcher do
 
   def dispatch(dispatcher, command, _opts), do: dispatcher.do_dispatch(command)
 
-  defp set_dispatch(command), do: update_meta(command, :dispatched, DateTime.utc_now())
+  defp set_dispatch(command), do: update_meta(command, :dispatched, NaiveDateTime.utc_now())
 
   defp set_id(command), do: update_meta(command, :id, generate_id())
 
@@ -38,10 +38,9 @@ defmodule Kvasir.Command.Dispatcher do
     do: %{command | __meta__: Map.put(meta, field, value)}
 
   @epoch_time "2018-09-01T00:00:00Z"
-              |> DateTime.from_iso8601()
+              |> NaiveDateTime.from_iso8601()
               |> elem(1)
-              |> DateTime.to_unix()
-              |> Kernel.*(1_000_000)
+              |> NaiveDateTime.diff(~N[1970-01-01 00:00:00], :microsecond)
 
   @spec generate_id :: non_neg_integer
   defp generate_id do
