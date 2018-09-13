@@ -6,7 +6,7 @@ defmodule Kvasir.Agent do
   defmacro __using__(opts \\ []) do
     client = opts[:client] || raise "Need to pass the Kvasir client."
     topic = opts[:topic] || raise "Need to pass the Kafka topic."
-    aggregate = opts[:aggregate] || raise "Need to pass the Kvasir aggregate."
+    model = opts[:model] || raise "Need to pass a Kvasir model."
     cache = Kvasir.Agent.Config.cache!(opts)
     registry = Kvasir.Agent.Config.registry!(opts)
 
@@ -19,7 +19,7 @@ defmodule Kvasir.Agent do
       @topic unquote(topic)
       @cache unquote(cache)
       @registry unquote(registry)
-      @aggregate unquote(aggregate)
+      @model unquote(model)
 
       def child_spec(_opts \\ []), do: Agent.child_spec(__agent__(:config))
 
@@ -31,9 +31,9 @@ defmodule Kvasir.Agent do
       def __agent__(:config),
         do: %{
           agent: __MODULE__,
-          aggregate: @aggregate,
           cache: @cache,
           client: @client,
+          model: @model,
           registry: @registry,
           topic: @topic
         }
