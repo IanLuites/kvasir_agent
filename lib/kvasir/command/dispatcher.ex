@@ -20,14 +20,16 @@ defmodule Kvasir.Command.Dispatcher do
   def dispatch(dispatcher, command = %{__meta__: %{dispatched: nil}}, opts) do
     command
     |> set_instance(opts[:instance])
-    |> set_dispatch()
     |> set_id()
+    |> set_dispatch(opts[:dispatch] || :single)
     |> dispatcher.do_dispatch()
   end
 
   def dispatch(dispatcher, command, _opts), do: dispatcher.do_dispatch(command)
 
-  defp set_dispatch(command), do: update_meta(command, :dispatched, NaiveDateTime.utc_now())
+  defp set_dispatch(command, type),
+    do:
+      command |> update_meta(:dispatch, type) |> update_meta(:dispatched, NaiveDateTime.utc_now())
 
   defp set_id(command), do: update_meta(command, :id, generate_id())
 

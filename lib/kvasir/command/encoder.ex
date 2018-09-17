@@ -1,24 +1,21 @@
 defmodule Kvasir.Command.Encoder do
-  def encode(command) do
-    %{
-      type: type(command),
-      meta: meta(command),
-      payload: payload(command)
-    }
-  end
+  def encode(command, opts \\ []), do: encoding(opts).encode(command, opts)
 
-  defp type(%command{}), do: inspect(command)
+  @base_encoders %{
+    brod: Kvasir.Command.Encodings.Brod,
+    json: Kvasir.Command.Encodings.JSON,
+    raw: Kvasir.Command.Encodings.Raw
+  }
 
-  defp meta(%{__meta__: meta}) do
-    meta
-    |> Map.from_struct()
-    |> Enum.reject(&is_nil(elem(&1, 1)))
-    |> Enum.into(%{})
-  end
+  @spec encoding(Keyword.t()) :: module
+  defp encoding(opts) do
+    encoding = opts[:encoding]
 
-  defp payload(command) do
-    command
-    |> Map.from_struct()
-    |> Map.delete(:__meta__)
+    cond do
+      is_nil(encoding) -> Kvasir.Command.Encodings.JSON
+      :erlang.function_exported(encoding, :encode, 2) -> encoding
+      encoding = @base_encoders[encoding] -> encoding
+      :no_valid_given -> {:error, :invalid_encoding}
+    end
   end
 end

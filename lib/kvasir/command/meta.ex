@@ -1,9 +1,16 @@
 defmodule Kvasir.Command.Meta do
+  @type t :: %__MODULE__{
+          id: String.t(),
+          scope: :global | {:instance, term},
+          dispatch: :single | :multiple
+        }
+
   defstruct [
     :id,
     :created,
     :dispatched,
-    :scope
+    :scope,
+    dispatch: :single
   ]
 
   defimpl Inspect do
