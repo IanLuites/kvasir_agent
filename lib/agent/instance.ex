@@ -15,6 +15,7 @@ defmodule Kvasir.Agent.Instance do
           id: id,
           cache: cache,
           topic: topic,
+          # partition: partition,
           model: model
         }
       ) do
@@ -109,9 +110,12 @@ defmodule Kvasir.Agent.Instance do
     %{state | keep_alive: Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)}
   end
 
-  defp commit_events(%{client: client, topic: topic, id: id}, events, ref) do
-    client.produce(topic, 0, id, Enum.map(events, &prepare_event(&1, ref)))
+  defp commit_events(state = %{client: client, topic: topic, id: id}, events, ref) do
+    client.produce(topic, 0, id, Enum.map(events, &prepare_event(&1, ref, state)))
   end
 
-  defp prepare_event(event, ref), do: %{event | __meta__: %{event.__meta__ | command: ref}}
+  defp prepare_event(event, ref, %{topic: topic, id: id}) do
+    meta = %{event.__meta__ | command: ref, topic: topic, partition: 0, key: id}
+    %{event | __meta__: meta}
+  end
 end

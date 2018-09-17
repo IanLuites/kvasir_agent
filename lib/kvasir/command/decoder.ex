@@ -27,22 +27,22 @@ defmodule Kvasir.Command.Decoder do
   end
 
   defp decode_command(command, data, meta),
-    do: do_decode_command(command.__command__(:fields), data, struct(command, %{__meta__: meta}))
+    do: do_decode_command(command.__command__(:fields), data, %{__meta__: meta}, command)
 
-  defp do_decode_command([], _data, acc), do: acc
+  defp do_decode_command([], _data, acc, command), do: {:ok, struct!(command, acc)}
 
-  defp do_decode_command([{property, type} | props], data, acc) do
-    case Map.fetch(data, to_string(property)) do
-      {:ok, value} ->
-        do_decode_command(props, data, Map.put(acc, property, parse_type(value, type)))
-
+  defp do_decode_command([{property, type, opts} | props], data, acc, command) do
+    with {:ok, value} <- Map.fetch(data, to_string(property)),
+         {:ok, parsed_value} <- Kvasir.Type.load(type, value, opts) do
+      do_decode_command(props, data, Map.put(acc, property, parsed_value), command)
+    else
       :error ->
-        {:error, :invalid_command_payload}
+        if opts[:optional],
+          do: do_decode_command(props, data, acc, command),
+          else: {:error, :missing_field}
+
+      error = {:error, _} ->
+        error
     end
   end
-
-  @unix ~N[1970-01-01 00:00:00]
-  defp parse_type(nil, _), do: nil
-  defp parse_type(value, :datetime), do: NaiveDateTime.add(@unix, value, :milliseconds)
-  defp parse_type(value, _), do: value
 end

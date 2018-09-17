@@ -19,9 +19,13 @@ defmodule Kvasir.Command do
     end
   end
 
-  defmacro field(name, type \\ :string) do
+  defmacro field(name, type \\ :string, opts \\ []) do
     quote do
-      Module.put_attribute(__MODULE__, :command_fields, {unquote(name), unquote(type)})
+      Module.put_attribute(
+        __MODULE__,
+        :command_fields,
+        {unquote(name), unquote(type), unquote(opts)}
+      )
     end
   end
 
@@ -30,7 +34,7 @@ defmodule Kvasir.Command do
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
 
       try do
-        import Kvasir.Command, only: [field: 1, field: 2]
+        import Kvasir.Command, only: [field: 1, field: 2, field: 3]
         unquote(block)
       after
         :ok
@@ -68,7 +72,16 @@ defmodule Kvasir.Command do
       defoverridable validate: 1, factory: 1
 
       defimpl Jason.Encoder, for: __MODULE__ do
-        def encode(value, opts), do: Jason.Encode.map(Kvasir.Command.Encoder.encode(value), opts)
+        alias Jason.EncodeError
+        alias Jason.Encoder.Map
+        alias Kvasir.Command.Encoder
+
+        def encode(value, opts) do
+          case Encoder.encode(value, encoding: :raw) do
+            {:ok, data} -> Map.encode(data, opts)
+            {:error, error} -> %EncodeError{message: "Command Encoding Error: #{error}"}
+          end
+        end
       end
     end
   end
@@ -95,6 +108,9 @@ defmodule Kvasir.Command do
       {:error, reason} -> raise "Failed to create #{command}, reason: #{reason}"
     end
   end
+
+  def is_command?(command) when is_atom(command), do: true
+  def is_command?(_), do: false
 
   defdelegate decode(value, meta \\ %Kvasir.Command.Meta{}), to: Kvasir.Command.Decoder
 end
