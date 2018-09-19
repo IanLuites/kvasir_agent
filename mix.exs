@@ -61,9 +61,13 @@ defmodule Kvasir.Agent.MixProject do
   end
 
   defp deps do
-    [
-      # {:kvasir, path: "../core", optional: true},
-      {:ex_doc, ">= 0.0.0", only: :dev}
-    ]
+    if System.get_env("KVASIR_LOCAL_PUBLISH") == "a-ok" do
+      [
+        {:kvasir, ">= 0.0.1-proto3", optional: true},
+        {:ex_doc, ">= 0.0.0", only: :dev}
+      ]
+    else
+      []
+    end
   end
 end

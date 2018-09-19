@@ -2,6 +2,8 @@ defmodule Kvasir.Command.Dispatcher do
   @callback dispatch(Kvasir.Command.t(), Keyword.t()) :: any
   @callback do_dispatch(Kvasir.Command.t()) :: any
 
+  @default_timeout 5_000
+
   defmacro __using__(_opts \\ []) do
     quote do
       @behaviour Kvasir.Command.Dispatcher
@@ -20,6 +22,8 @@ defmodule Kvasir.Command.Dispatcher do
   def dispatch(dispatcher, command = %{__meta__: %{dispatched: nil}}, opts) do
     command
     |> set_instance(opts[:instance])
+    |> set_wait(opts[:wait])
+    |> set_timeout(opts[:timeout])
     |> set_id()
     |> set_dispatch(opts[:dispatch] || :single)
     |> dispatcher.do_dispatch()
@@ -33,7 +37,20 @@ defmodule Kvasir.Command.Dispatcher do
 
   defp set_id(command), do: update_meta(command, :id, generate_id())
 
-  defp set_instance(command, nil), do: update_meta(command, :scope, :global)
+  defp set_wait(command, nil), do: command
+  defp set_wait(command, wait), do: update_meta(command, :wait, wait)
+
+  defp set_timeout(command, nil), do: update_meta(command, :timeout, @default_timeout)
+  defp set_timeout(command, timeout), do: update_meta(command, :timeout, timeout)
+
+  defp set_instance(command = %type{}, nil) do
+    if instance = Map.get(command, type.__command__(:instance_id)) do
+      update_meta(command, :scope, {:instance, instance})
+    else
+      update_meta(command, :scope, :global)
+    end
+  end
+
   defp set_instance(command, id), do: update_meta(command, :scope, {:instance, id})
 
   defp update_meta(command = %{__meta__: meta}, field, value),

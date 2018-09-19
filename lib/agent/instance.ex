@@ -41,7 +41,12 @@ defmodule Kvasir.Agent.Instance do
       end)
 
     cache.save(agent, id, Map.put(agent_state, :offset, offset))
-    state = state |> Map.put(:agent_state, agent_state) |> Map.put(:offset, offset)
+
+    state =
+      state
+      |> Map.put(:agent_state, agent_state)
+      |> Map.put(:offset, offset)
+      |> Map.put(:callbacks, %{})
 
     keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
     {:ok, Map.put(state, :keep_alive, keep_alive)}
@@ -84,11 +89,17 @@ defmodule Kvasir.Agent.Instance do
     case state.offset < offset && state.model.apply(state.agent_state, event) do
       {:ok, updated_state} ->
         state.cache.save(state.agent, state.id, Map.put(updated_state, :offset, offset))
-        {:noreply, %{state | offset: offset, agent_state: updated_state}}
+        state = %{state | offset: offset, agent_state: updated_state}
+        {:noreply, notify_offset_callbacks(state, offset)}
 
       _ ->
         {:noreply, state}
     end
+  end
+
+  def handle_info({:offset_callback, from, ref, offset}, state) do
+    Logger.debug(fn -> "Agent<#{state.id}>: Adding callback (#{inspect(offset)})" end)
+    {:noreply, add_offset_callback(state, {from, ref}, offset)}
   end
 
   def handle_info({:shutdown, reason}, state) do
@@ -117,5 +128,21 @@ defmodule Kvasir.Agent.Instance do
   defp prepare_event(event, ref, %{topic: topic, id: id}) do
     meta = %{event.__meta__ | command: ref, topic: topic, partition: 0, key: id}
     %{event | __meta__: meta}
+  end
+
+  defp add_offset_callback(state = %{callbacks: callbacks}, pid, offset) do
+    callbacks = Map.update(callbacks, offset, [pid], &[pid | &1])
+
+    %{state | callbacks: callbacks}
+  end
+
+  def notify_offset_callbacks(state = %{callbacks: callbacks}, offset) do
+    grouped = Enum.group_by(callbacks, &(elem(&1, 0) <= offset))
+
+    Enum.each(Map.get(grouped, true, []), fn {off, listeners} ->
+      Enum.each(listeners, fn {pid, ref} -> send(pid, {:offset_reached, ref, off}) end)
+    end)
+
+    %{state | callbacks: Enum.into(Map.get(grouped, false, []), %{})}
   end
 end

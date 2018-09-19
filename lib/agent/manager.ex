@@ -6,17 +6,38 @@ defmodule Kvasir.Agent.Manager do
     GenServer.start_link(__MODULE__, config, name: manager(config.agent))
   end
 
-  def dispatch(agent, command) do
-    {:instance, id} = command.__meta__.scope
-    timeout = 5_000
-
+  def dispatch(agent, command = %{__meta__: %{scope: {:instance, id}}}) do
     with :ok <- GenServer.call(manager(agent), {:command, id, command}) do
-      ref = command.__meta__.id
+      after_dispatch(agent, command, command.__meta__.wait)
+    end
+  end
+
+  def dispatch(_, _), do: {:error, :requires_instance}
+
+  defp after_dispatch(_agent, _command, :dispatch), do: :ok
+
+  defp after_dispatch(_agent, command, :execute) do
+    timeout = command.__meta__.timeout
+    ref = command.__meta__.id
+
+    receive do
+      {:command, ^ref, response} -> response
+    after
+      timeout -> {:error, :execute_timeout}
+    end
+  end
+
+  defp after_dispatch(agent, command, :apply) do
+    with {:ok, offset} <- after_dispatch(agent, command, :execute),
+         ref <- command.__meta__.id,
+         %{__meta__: %{scope: {:instance, id}}} <- command,
+         :ok <- GenServer.call(manager(agent), {:offset_callback, id, ref, offset}) do
+      timeout = command.__meta__.timeout
 
       receive do
-        {:command, ^ref, response} -> response
+        {:offset_reached, ^ref, ^offset} -> {:ok, offset}
       after
-        timeout -> {:error, :command_timeout}
+        timeout -> {:error, :apply_timeout}
       end
     end
   end
@@ -46,6 +67,15 @@ defmodule Kvasir.Agent.Manager do
   def handle_call({:command, id, command}, {from, _ref}, config) do
     with {:ok, agent} <- Kvasir.Agent.Supervisor.open(config, id) do
       send(agent, {:command, from, command})
+      {:reply, :ok, config}
+    else
+      error -> {:reply, error, config}
+    end
+  end
+
+  def handle_call({:offset_callback, id, ref, offset}, {from, _ref}, config) do
+    with {:ok, agent} <- Kvasir.Agent.Supervisor.open(config, id) do
+      send(agent, {:offset_callback, from, ref, offset})
       {:reply, :ok, config}
     else
       error -> {:reply, error, config}
