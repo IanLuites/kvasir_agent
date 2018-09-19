@@ -1,13 +1,21 @@
 defmodule Kvasir.Command.Router do
   require Logger
 
-  defmacro __using__(_opts \\ []) do
+  defmacro __using__(opts \\ []) do
+    no_match =
+      case opts[:no_match] do
+        nil -> :ok
+        :error -> {:error, :no_match}
+        custom -> custom
+      end
+
     quote location: :keep do
       use Kvasir.Command.Dispatcher
       require Kvasir.Command.Router
-      import Kvasir.Command.Router, only: [dispatch: 1]
+      import Kvasir.Command.Router, only: [dispatch: 1, dispatch_match: 4]
       Module.register_attribute(__MODULE__, :dispatch, accumulate: true)
       @before_compile Kvasir.Command.Router
+      @no_match unquote(no_match)
     end
   end
 
@@ -15,13 +23,15 @@ defmodule Kvasir.Command.Router do
     env = __CALLER__
     to = opts[:to] || raise "Need to set dispatch target with `to:`."
     namespace = if ns = opts[:namespace], do: inspect(Macro.expand(ns, env)), else: ""
-    match = opts |> Keyword.get(:in, []) |> Enum.map(&inspect(Macro.expand(&1, env)))
+    include = opts |> Keyword.get(:in, []) |> Enum.map(&inspect(Macro.expand(&1, env)))
+    match = Keyword.get(opts, :match, nil)
+    scope = Keyword.get(opts, :scope, nil)
 
     quote do
       Module.put_attribute(
         __MODULE__,
         :dispatch,
-        {unquote(to), unquote(namespace), unquote(match)}
+        {unquote(to), unquote(namespace), unquote(include), unquote(match), unquote(scope)}
       )
     end
   end
@@ -54,37 +64,45 @@ defmodule Kvasir.Command.Router do
     #   )
 
     quote do
-      @spec dispatch_match(list, String.t(), Kvasir.Command.t()) :: :ok | {:error, atom}
-      defp dispatch_match([], _, _), do: :ok
-
-      defp dispatch_match([dispatch | tail], type, command) do
-        to = do_match(dispatch, type)
-
-        cond do
-          command.__meta__.dispatch == :multi and not is_nil(to) ->
-            to.dispatch(command)
-            dispatch_match(tail, type, command)
-
-          not is_nil(to) ->
-            to.dispatch(command)
-
-          :no_match ->
-            dispatch_match(tail, type, command)
-        end
-      end
-
-      @spec do_match({module, String.t(), [String.t()]}, String.t()) :: module | nil
-      defp do_match(a = {to, ns, s}, c) do
-        cond do
-          not String.starts_with?(c, ns) -> nil
-          s == [] or c in s -> to
-          :no_match -> nil
-        end
-      end
-
       @impl Kvasir.Command.Dispatcher
       def do_dispatch(command = %type{}),
-        do: dispatch_match(@dispatch, inspect(type), command)
+        do: dispatch_match(@dispatch, inspect(type), command, no_match: @no_match)
     end
   end
+
+  @doc false
+  @spec dispatch_match(list, String.t(), Kvasir.Command.t(), Keyword.t()) :: :ok | {:error, atom}
+  def dispatch_match([], _, _, opts), do: opts[:no_match] || :ok
+
+  def dispatch_match([dispatch | tail], type, command, opts) do
+    to = do_match(dispatch, type)
+
+    cond do
+      command.__meta__.dispatch == :multi and not is_nil(to) ->
+        to.dispatch(command)
+        dispatch_match(tail, type, command, opts)
+
+      not is_nil(to) ->
+        to.dispatch(command)
+
+      :no_match ->
+        dispatch_match(tail, type, command, opts)
+    end
+  end
+
+  @spec do_match({module, String.t(), [String.t()], Regex.t()}, String.t()) :: module | nil
+  defp do_match({to, ns, s, m, scope}, c) do
+    cond do
+      not String.starts_with?(c, ns) -> nil
+      not scope_match?(c, scope) -> nil
+      m != nil and not c =~ m -> nil
+      s != [] or c not in s -> nil
+      :match -> to
+    end
+  end
+
+  @spec scope_match?(Kvasir.Command.t(), atom) :: boolean
+  defp scope_match?(_, nil), do: true
+  defp scope_match?(%{__meta__: %{scope: {type, _}}}, scope), do: scope == type
+  defp scope_match?(%{__meta__: %{scope: type}}, scope), do: scope == type
 end
