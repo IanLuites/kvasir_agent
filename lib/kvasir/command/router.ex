@@ -78,15 +78,15 @@ defmodule Kvasir.Command.Router do
     to = do_match(dispatch, type)
 
     cond do
-      command.__meta__.dispatch == :multi and not is_nil(to) ->
+      is_nil(to) ->
+        dispatch_match(tail, type, command, opts)
+
+      command.__meta__.dispatch == :multi ->
         to.dispatch(command)
         dispatch_match(tail, type, command, opts)
 
-      not is_nil(to) ->
+      :single ->
         to.dispatch(command)
-
-      :no_match ->
-        dispatch_match(tail, type, command, opts)
     end
   end
 
@@ -96,7 +96,7 @@ defmodule Kvasir.Command.Router do
       not String.starts_with?(c, ns) -> nil
       not scope_match?(c, scope) -> nil
       m != nil and not c =~ m -> nil
-      s != [] or c not in s -> nil
+      s != [] and c not in s -> nil
       :match -> to
     end
   end
