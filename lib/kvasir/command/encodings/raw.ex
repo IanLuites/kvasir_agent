@@ -1,7 +1,7 @@
 defmodule Kvasir.Command.Encodings.Raw do
   import Kvasir.Type, only: [do_encode: 3]
 
-  def encode(command, opts) do
+  def encode(command, _opts) do
     with {:ok, payload} <- payload(command) do
       {:ok,
        %{
@@ -12,7 +12,7 @@ defmodule Kvasir.Command.Encodings.Raw do
     end
   end
 
-  def decode(data, opts) do
+  def decode(_data, _opts) do
   end
 
   ### Helpers ###

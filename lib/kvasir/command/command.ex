@@ -41,6 +41,11 @@ defmodule Kvasir.Command do
       end
 
       @struct_fields Enum.reverse(@command_fields)
+      @instance_id Enum.find_value(
+                     @command_fields,
+                     :global,
+                     &if(elem(&1, 2)[:instance_id], do: elem(&1, 0))
+                   )
       defstruct Enum.map(@struct_fields, &elem(&1, 0)) ++ [__meta__: %Kvasir.Command.Meta{}]
 
       @behaviour Kvasir.Command
@@ -48,6 +53,7 @@ defmodule Kvasir.Command do
       @doc false
       @impl Kvasir.Command
       def __command__(:fields), do: @struct_fields
+      def __command__(:instance_id), do: @instance_id
 
       @doc ~S"""
       Create this command.
@@ -99,6 +105,8 @@ defmodule Kvasir.Command do
          :ok <- command.validate(result) do
       {:ok, result}
     end
+  rescue
+    KeyError -> {:error, :invalid_command_data}
   end
 
   def create!(command, data) do
