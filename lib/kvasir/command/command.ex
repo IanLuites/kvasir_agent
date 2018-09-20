@@ -6,9 +6,9 @@ defmodule Kvasir.Command do
   @type t :: term
 
   @callback __command__(atom) :: any
-  @callback create(any) :: {:ok, t} | {:error, atom}
-  @callback create!(any) :: {:ok, t} | {:error, atom}
-  @callback factory(any) :: {:ok, map} | {:error, atom}
+  # @callback create(any) :: {:ok, t} | {:error, atom}
+  # @callback create!(any) :: {:ok, t} | {:error, atom}
+  # @callback factory(any) :: {:ok, map} | {:error, atom}
   @callback validate(t) :: :ok | {:error, atom}
 
   @doc @moduledoc
@@ -31,6 +31,7 @@ defmodule Kvasir.Command do
 
   defmacro command(do: block) do
     quote do
+      @before_compile Kvasir.Command
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
 
       try do
@@ -50,33 +51,6 @@ defmodule Kvasir.Command do
 
       @behaviour Kvasir.Command
 
-      @doc false
-      @impl Kvasir.Command
-      def __command__(:fields), do: @struct_fields
-      def __command__(:instance_id), do: @instance_id
-
-      @doc ~S"""
-      Create this command.
-      """
-      @impl Kvasir.Command
-      def create(data), do: Kvasir.Command.create(__MODULE__, data)
-
-      @doc ~S"""
-      See: `create/1`.
-      """
-      @impl Kvasir.Command
-      def create!(data), do: Kvasir.Command.create!(__MODULE__, data)
-
-      @doc false
-      @impl Kvasir.Command
-      def factory(payload), do: {:ok, payload}
-
-      @doc false
-      @impl Kvasir.Command
-      def validate(command), do: :ok
-
-      defoverridable validate: 1, factory: 1
-
       defimpl Jason.Encoder, for: __MODULE__ do
         alias Jason.EncodeError
         alias Jason.Encoder.Map
@@ -92,6 +66,73 @@ defmodule Kvasir.Command do
     end
   end
 
+  defmacro __before_compile__(env) do
+    arities =
+      env.module
+      |> Module.definitions_in(:def)
+      |> Enum.filter(&(elem(&1, 0) == :factory))
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.sort()
+
+    quote do
+      unquote(creation(arities))
+
+      @doc false
+      @impl Kvasir.Command
+      def validate(command), do: :ok
+
+      defoverridable validate: 1
+
+      @doc false
+      @impl Kvasir.Command
+      def __command__(:fields), do: @struct_fields
+      def __command__(:instance_id), do: @instance_id
+      def __command__(:create), do: unquote(arities)
+    end
+  end
+
+  defp creation([]) do
+    quote do
+      @doc ~S"""
+      Create this command.
+      """
+      # @impl Kvasir.Command
+      def create(data), do: Kvasir.Command.create(__MODULE__, data)
+
+      @doc ~S"""
+      See: `create/1`.
+      """
+      # @impl Kvasir.Command
+      def create!(data), do: Kvasir.Command.create!(__MODULE__, data)
+
+      @doc false
+      # @impl Kvasir.Command
+      def factory(payload), do: {:ok, payload}
+    end
+  end
+
+  defp creation(arities) do
+    Enum.reduce(arities, nil, fn arity, acc ->
+      data = 1..arity |> Enum.map(&Macro.var(:"arg#{&1}", nil))
+
+      quote do
+        unquote(acc)
+
+        @doc ~S"""
+        Create this command.
+        """
+        # @impl Kvasir.Command
+        def create(unquote_splicing(data)), do: Kvasir.Command.create(__MODULE__, unquote(data))
+
+        @doc """
+        See: `create/#{unquote(arity)}`.
+        """
+        # @impl Kvasir.Command
+        def create!(unquote_splicing(data)), do: Kvasir.Command.create!(__MODULE__, unquote(data))
+      end
+    end)
+  end
+
   @doc ~S"""
   Create a command by passing the command module and payload.
   """
@@ -100,7 +141,7 @@ defmodule Kvasir.Command do
       created: DateTime.utc_now()
     }
 
-    with {:ok, payload} <- command.factory(data),
+    with {:ok, payload} <- apply(command, :factory, data),
          result <- struct!(command, Map.put(payload, :__meta__, meta)),
          :ok <- command.validate(result) do
       {:ok, result}
