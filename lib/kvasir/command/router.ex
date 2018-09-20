@@ -23,7 +23,7 @@ defmodule Kvasir.Command.Router do
     env = __CALLER__
     to = opts[:to] || raise "Need to set dispatch target with `to:`."
     namespace = if ns = opts[:namespace], do: inspect(Macro.expand(ns, env)), else: ""
-    include = opts |> Keyword.get(:in, []) |> Enum.map(&inspect(Macro.expand(&1, env)))
+    include = opts |> Keyword.get(:for, []) |> Enum.map(&inspect(Macro.expand(&1, env)))
     match = Keyword.get(opts, :match, nil)
     scope = Keyword.get(opts, :scope, nil)
 
@@ -39,29 +39,6 @@ defmodule Kvasir.Command.Router do
   defmacro __before_compile__(env) do
     dispatches = Module.get_attribute(env.module, :dispatch)
     if dispatches == [], do: Logger.warn(fn -> "#{env.module}: No dispatches set." end)
-
-    # dispatch =
-    #   Enum.reduce(
-    #     dispatches,
-    #     quote do
-    #       defp do_match(_, _), do: :ok
-    #     end,
-    #     fn
-    #       {to, namespace, []}, acc ->
-    #         quote do
-    #           defp do_match(unquote(namespace) <> _, command), do: unquote(to).dispatch(command)
-    #           unquote(acc)
-    #         end
-
-    #       {to, namespace, values}, acc ->
-    #         quote do
-    #           defp do_match(ns = unquote(namespace) <> _, command) when ns in unquote(values),
-    #             do: unquote(to).dispatch(command)
-
-    #           unquote(acc)
-    #         end
-    #     end
-    #   )
 
     quote do
       @impl Kvasir.Command.Dispatcher
