@@ -44,6 +44,7 @@ defmodule Kvasir.Agent.MixProject do
         "lib/kvasir",
         "lib/agent",
         "lib/agent.ex",
+        ".formatter.exs",
         "mix.exs",
         "README*",
         "LICENSE*"
