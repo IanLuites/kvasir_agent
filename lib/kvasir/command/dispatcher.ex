@@ -1,6 +1,12 @@
 defmodule Kvasir.Command.Dispatcher do
-  @callback dispatch(Kvasir.Command.t(), Keyword.t()) :: any
-  @callback do_dispatch(Kvasir.Command.t()) :: any
+  @callback dispatch(Kvasir.Command.t(), Keyword.t()) ::
+              {:ok, Kvasir.Command.t()}
+              | {:ok, Kvasir.Command.t(), Kvasir.Offset.t()}
+              | {:error, atom}
+  @callback do_dispatch(Kvasir.Command.t()) ::
+              {:ok, Kvasir.Command.t()}
+              | {:ok, Kvasir.Command.t(), Kvasir.Offset.t()}
+              | {:error, atom}
 
   @default_timeout 5_000
 
@@ -20,13 +26,19 @@ defmodule Kvasir.Command.Dispatcher do
   def dispatch(dispatcher, command, opts \\ [])
 
   def dispatch(dispatcher, command = %{__meta__: %{dispatched: nil}}, opts) do
-    command
-    |> set_instance(opts[:instance])
-    |> set_wait(opts[:wait])
-    |> set_timeout(opts[:timeout])
-    |> set_id()
-    |> set_dispatch(opts[:dispatch] || :single)
-    |> dispatcher.do_dispatch()
+    command = set_instance(command, opts[:instance])
+
+    case set_wait(command, opts[:wait]) do
+      error = {:error, _} ->
+        error
+
+      command ->
+        command
+        |> set_timeout(opts[:timeout])
+        |> set_id()
+        |> set_dispatch(opts[:dispatch] || :single)
+        |> dispatcher.do_dispatch()
+    end
   end
 
   def dispatch(dispatcher, command, _opts), do: dispatcher.do_dispatch(command)
@@ -38,7 +50,11 @@ defmodule Kvasir.Command.Dispatcher do
   defp set_id(command), do: update_meta(command, :id, generate_id())
 
   defp set_wait(command, nil), do: command
-  defp set_wait(command, wait), do: update_meta(command, :wait, wait)
+
+  defp set_wait(command, wait) when wait in ~w(dispatch execute apply)a,
+    do: update_meta(command, :wait, wait)
+
+  defp set_wait(_command, _), do: {:error, :invalid_wait_value}
 
   defp set_timeout(command, nil), do: update_meta(command, :timeout, @default_timeout)
   defp set_timeout(command, timeout), do: update_meta(command, :timeout, timeout)

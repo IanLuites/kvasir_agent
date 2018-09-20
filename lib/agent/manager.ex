@@ -21,21 +21,26 @@ defmodule Kvasir.Agent.Manager do
     ref = command.__meta__.id
 
     receive do
-      {:command, ^ref, response} -> response
+      {:command, ^ref, response} ->
+        case response do
+          :ok -> {:ok, command}
+          {:ok, offset} -> {:ok, command, offset}
+          error -> error
+        end
     after
       timeout -> {:error, :execute_timeout}
     end
   end
 
   defp after_dispatch(agent, command, :apply) do
-    with {:ok, offset} <- after_dispatch(agent, command, :execute),
+    with {:ok, _, offset} <- after_dispatch(agent, command, :execute),
          ref <- command.__meta__.id,
          %{__meta__: %{scope: {:instance, id}}} <- command,
          :ok <- GenServer.call(manager(agent), {:offset_callback, id, ref, offset}) do
       timeout = command.__meta__.timeout
 
       receive do
-        {:offset_reached, ^ref, ^offset} -> {:ok, offset}
+        {:offset_reached, ^ref, ^offset} -> {:ok, command, offset}
       after
         timeout -> {:error, :apply_timeout}
       end
