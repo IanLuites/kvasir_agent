@@ -3,10 +3,10 @@ defmodule Kvasir.Agent.Cache.ETS do
   @storage_table __MODULE__
 
   @impl Kvasir.Agent.Cache
-  def save(module, id, data) do
+  def save(module, id, data, offset) do
     ensure_storage_table_created()
 
-    :ets.insert(@storage_table, {{module, id}, data})
+    :ets.insert(@storage_table, {{module, id}, data, offset})
   end
 
   @impl Kvasir.Agent.Cache
@@ -14,8 +14,8 @@ defmodule Kvasir.Agent.Cache.ETS do
     ensure_storage_table_created()
 
     case :ets.lookup(@storage_table, {module, id}) do
-      [{_, cache}] -> cache
-      _ -> nil
+      [{_, cache, offset}] -> {:ok, offset, cache}
+      _ -> {:error, :not_found}
     end
   end
 
