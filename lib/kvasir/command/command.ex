@@ -1,6 +1,8 @@
 defmodule Kvasir.Command do
   @moduledoc ~S"""
   """
+  alias Kvasir.Command.{Encoder, Meta}
+  import NaiveDateTime, only: [utc_now: 0]
 
   @typedoc @moduledoc
   @type t :: term
@@ -16,6 +18,7 @@ defmodule Kvasir.Command do
     quote do
       require Kvasir.Command
       import Kvasir.Command, only: [command: 1]
+      import Kvasir.Command.Encodings.Raw, only: [decode: 2]
     end
   end
 
@@ -88,6 +91,9 @@ defmodule Kvasir.Command do
       def __command__(:fields), do: @struct_fields
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
+
+      @doc false
+      def create_from(data), do: decode(%{payload: data, type: __MODULE__}, process: :create)
     end
   end
 
@@ -137,12 +143,8 @@ defmodule Kvasir.Command do
   Create a command by passing the command module and payload.
   """
   def create(command, data) do
-    meta = %Kvasir.Command.Meta{
-      created: DateTime.utc_now()
-    }
-
     with {:ok, payload} <- apply(command, :factory, data),
-         result <- struct!(command, Map.put(payload, :__meta__, meta)),
+         result <- struct!(command, Map.put(payload, :__meta__, %Meta{created: utc_now()})),
          :ok <- command.validate(result) do
       {:ok, result}
     end
@@ -161,5 +163,13 @@ defmodule Kvasir.Command do
   def is_command?(command) when is_atom(command), do: true
   def is_command?(_), do: false
 
-  defdelegate decode(value, meta \\ %Kvasir.Command.Meta{}), to: Kvasir.Command.Decoder
+  def set_executed(command), do: update_meta(command, :executed, utc_now())
+  def set_applied(command), do: update_meta(command, :applied, utc_now())
+  def set_offset(command, offset), do: update_meta(command, :offset, offset)
+
+  defp update_meta(command = %{__meta__: meta}, field, value),
+    do: %{command | __meta__: Map.put(meta, field, value)}
+
+  defdelegate encode(value, opts \\ []), to: Encoder
+  defdelegate decode(value, opts \\ []), to: Encoder
 end

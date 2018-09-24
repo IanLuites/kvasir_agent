@@ -1,5 +1,6 @@
 defmodule Kvasir.Command.Encoder do
   def encode(command, opts \\ []), do: encoding(opts).encode(command, opts)
+  def decode(command, opts \\ []), do: encoding(opts).decode(command, opts)
 
   @base_encoders %{
     brod: Kvasir.Command.Encodings.Brod,
