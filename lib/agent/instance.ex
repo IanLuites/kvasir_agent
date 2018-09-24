@@ -1,9 +1,11 @@
 defmodule Kvasir.Agent.Instance do
   use GenServer
   require Logger
+  alias Kvasir.Offset
   @keep_alive 60_000
 
   def start_agent(config, id, opts) do
+    config = Map.put(config, :partition, 0)
     GenServer.start_link(__MODULE__, Map.put(config, :id, id), opts)
   end
 
@@ -15,32 +17,12 @@ defmodule Kvasir.Agent.Instance do
           id: id,
           cache: cache,
           topic: topic,
-          # partition: partition,
           model: model
         }
       ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
-
-    agent_state = cache.load(agent, id) || Map.put(model.base(id), :offset, :earliest)
-
-    {offset, from} =
-      if is_integer(agent_state.offset),
-        do: {agent_state.offset, agent_state.offset + 1},
-        else: {-1, agent_state.offset}
-
-    agent_state = Map.delete(agent_state, :offset)
-
-    {offset, agent_state} =
-      topic
-      |> client.stream(from: from, to: :last)
-      |> Stream.filter(&(&1.__meta__.key == id))
-      |> Enum.reduce({offset, agent_state}, fn event, {_offset, state} ->
-        with {:ok, updated_state} <- model.apply(state, event) do
-          {event.__meta__.offset, updated_state}
-        end
-      end)
-
-    cache.save(agent, id, Map.put(agent_state, :offset, offset))
+    {offset, agent_state} = load_state(client, cache, topic, model, agent, id)
+    cache.save(agent, id, agent_state, offset)
 
     state =
       state
@@ -50,6 +32,29 @@ defmodule Kvasir.Agent.Instance do
 
     keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
     {:ok, Map.put(state, :keep_alive, keep_alive)}
+  end
+
+  defp load_state(client, cache, topic, model, agent, id) do
+    case cache.load(agent, id) do
+      {:ok, offset, state} ->
+        Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{offset}" end)
+        build_state(client, topic, model, id, offset, state)
+
+      {:error, reason} ->
+        Logger.debug(fn -> "Agent<#{id}>: No State Loaded: #{reason}" end)
+        build_state(client, topic, model, id, :earliest, model.base(id))
+    end
+  end
+
+  defp build_state(client, topic, model, id, offset, original_state) do
+    topic
+    |> client.stream(from: offset, to: :last)
+    |> Stream.filter(&(&1.__meta__.key == id))
+    |> Enum.reduce({offset, original_state}, fn event, {offset, state} ->
+      with {:ok, updated_state} <- model.apply(state, event) do
+        {Offset.set(offset, event.__meta__.offset), updated_state}
+      end
+    end)
   end
 
   @impl GenServer
@@ -85,12 +90,14 @@ defmodule Kvasir.Agent.Instance do
   def handle_info({:event, event}, state) do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     offset = event.__meta__.offset
+    newer = Offset.compare(state.offset, offset) == :lt
 
-    case state.offset < offset && state.model.apply(state.agent_state, event) do
+    case newer && state.model.apply(state.agent_state, event) do
       {:ok, updated_state} ->
-        state.cache.save(state.agent, state.id, Map.put(updated_state, :offset, offset))
-        state = %{state | offset: offset, agent_state: updated_state}
-        {:noreply, notify_offset_callbacks(state, offset)}
+        updated_offset = Offset.set(state.offset, offset)
+        state.cache.save(state.agent, state.id, updated_state, updated_offset)
+        state = %{state | offset: updated_offset, agent_state: updated_state}
+        {:noreply, notify_offset_callbacks(state, updated_offset)}
 
       _ ->
         {:noreply, state}
@@ -125,8 +132,8 @@ defmodule Kvasir.Agent.Instance do
     client.produce(topic, 0, id, Enum.map(events, &prepare_event(&1, ref, state)))
   end
 
-  defp prepare_event(event, ref, %{topic: topic, id: id}) do
-    meta = %{event.__meta__ | command: ref, topic: topic, partition: 0, key: id}
+  defp prepare_event(event, ref, %{topic: topic, id: id, partition: partition}) do
+    meta = %{event.__meta__ | command: ref, topic: topic, partition: partition, key: id}
     %{event | __meta__: meta}
   end
 
@@ -137,7 +144,7 @@ defmodule Kvasir.Agent.Instance do
   end
 
   def notify_offset_callbacks(state = %{callbacks: callbacks}, offset) do
-    grouped = Enum.group_by(callbacks, &(elem(&1, 0) <= offset))
+    grouped = Enum.group_by(callbacks, &(Offset.compare(elem(&1, 0), offset) != :lt))
 
     Enum.each(Map.get(grouped, true, []), fn {off, listeners} ->
       Enum.each(listeners, fn {pid, ref} -> send(pid, {:offset_reached, ref, off}) end)
