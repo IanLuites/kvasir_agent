@@ -1,12 +1,7 @@
 defmodule Kvasir.Command.Dispatcher do
   @callback dispatch(Kvasir.Command.t(), Keyword.t()) ::
-              {:ok, Kvasir.Command.t()}
-              | {:ok, Kvasir.Command.t(), Kvasir.Offset.t()}
-              | {:error, atom}
-  @callback do_dispatch(Kvasir.Command.t()) ::
-              {:ok, Kvasir.Command.t()}
-              | {:ok, Kvasir.Command.t(), Kvasir.Offset.t()}
-              | {:error, atom}
+              {:ok, Kvasir.Command.t()} | {:error, atom}
+  @callback do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
 
   @default_timeout 5_000
 

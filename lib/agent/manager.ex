@@ -1,6 +1,7 @@
 defmodule Kvasir.Agent.Manager do
   use GenServer
   import Kvasir.Agent.Helpers, only: [manager: 1]
+  alias Kvasir.Command
 
   def start_link(config) do
     GenServer.start_link(__MODULE__, config, name: manager(config.agent))
@@ -23,8 +24,8 @@ defmodule Kvasir.Agent.Manager do
     receive do
       {:command, ^ref, response} ->
         case response do
-          :ok -> {:ok, command}
-          {:ok, offset} -> {:ok, command, offset}
+          :ok -> {:ok, Command.set_executed(command)}
+          {:ok, offset} -> {:ok, Command.set_offset(Command.set_executed(command), offset)}
           error -> error
         end
     after
@@ -33,14 +34,14 @@ defmodule Kvasir.Agent.Manager do
   end
 
   defp after_dispatch(agent, command, :apply) do
-    with {:ok, _, offset} <- after_dispatch(agent, command, :execute),
+    with {:ok, command} <- after_dispatch(agent, command, :execute),
          ref <- command.__meta__.id,
-         %{__meta__: %{scope: {:instance, id}}} <- command,
+         %{__meta__: %{offset: offset, scope: {:instance, id}}} <- command,
          :ok <- GenServer.call(manager(agent), {:offset_callback, id, ref, offset}) do
       timeout = command.__meta__.timeout
 
       receive do
-        {:offset_reached, ^ref, ^offset} -> {:ok, command, offset}
+        {:offset_reached, ^ref, ^offset} -> {:ok, Command.set_applied(command)}
       after
         timeout -> {:error, :apply_timeout}
       end
