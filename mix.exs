@@ -1,6 +1,6 @@
 defmodule Kvasir.Agent.MixProject do
   use Mix.Project
-  @version "0.0.1-proto5"
+  @version "0.0.1-proto7"
 
   def project do
     [
@@ -57,14 +57,15 @@ defmodule Kvasir.Agent.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {Kvasir.Agent.Application, []}
     ]
   end
 
   defp deps do
     if System.get_env("KVASIR_LOCAL_PUBLISH") == "a-ok" do
       [
-        {:kvasir, ">= 0.0.1-proto3", optional: true},
+        {:kvasir, ">= #{@version}", optional: true},
         {:ex_doc, ">= 0.0.0", only: :dev}
       ]
     else
