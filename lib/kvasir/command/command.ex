@@ -17,7 +17,7 @@ defmodule Kvasir.Command do
   defmacro __using__(_opts \\ []) do
     quote do
       require Kvasir.Command
-      import Kvasir.Command, only: [command: 1]
+      import Kvasir.Command, only: [command: 2]
       import Kvasir.Command.Encodings.Raw, only: [decode: 2]
     end
   end
@@ -32,8 +32,11 @@ defmodule Kvasir.Command do
     end
   end
 
-  defmacro command(do: block) do
+  defmacro command(type, do: block) do
+    registry = Module.concat(Kvasir.Command.Registry, __CALLER__.module)
+
     quote do
+      @command_type unquote(Kvasir.Util.name(type))
       @before_compile Kvasir.Command
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
 
@@ -42,6 +45,18 @@ defmodule Kvasir.Command do
         unquote(block)
       after
         :ok
+      end
+
+      defmodule unquote(registry) do
+        @moduledoc false
+
+        @doc false
+        @spec type :: String.t()
+        def type, do: unquote(Kvasir.Util.name(type))
+
+        @doc false
+        @spec module :: module
+        def module, do: unquote(__CALLER__.module)
       end
 
       @struct_fields Enum.reverse(@command_fields)
@@ -88,6 +103,7 @@ defmodule Kvasir.Command do
 
       @doc false
       @impl Kvasir.Command
+      def __command__(:type), do: @command_type
       def __command__(:fields), do: @struct_fields
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
