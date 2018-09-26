@@ -15,7 +15,7 @@ defmodule Kvasir.Agent.Manager do
 
   def dispatch(_, _), do: {:error, :requires_instance}
 
-  defp after_dispatch(_agent, _command, :dispatch), do: :ok
+  defp after_dispatch(_agent, command, :dispatch), do: {:ok, command}
 
   defp after_dispatch(_agent, command, :execute) do
     timeout = command.__meta__.timeout
