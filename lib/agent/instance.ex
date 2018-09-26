@@ -137,10 +137,15 @@ defmodule Kvasir.Agent.Instance do
     %{event | __meta__: meta}
   end
 
-  defp add_offset_callback(state = %{callbacks: callbacks}, pid, offset) do
-    callbacks = Map.update(callbacks, offset, [pid], &[pid | &1])
+  defp add_offset_callback(state = %{callbacks: callbacks, offset: now}, l = {pid, ref}, offset) do
+    if Offset.compare(now, offset) == :lt do
+      callbacks = Map.update(callbacks, offset, [l], &[l | &1])
 
-    %{state | callbacks: callbacks}
+      %{state | callbacks: callbacks}
+    else
+      send(pid, {:offset_reached, ref, offset})
+      state
+    end
   end
 
   def notify_offset_callbacks(state = %{callbacks: callbacks}, offset) do

@@ -30,7 +30,7 @@ defmodule Kvasir.Command.Encodings.Raw do
   ### Helpers ###
   ## Encoding  ##
 
-  defp type(%command{}), do: inspect(command)
+  defp type(%command{}), do: command.__command__(:type)
 
   defp meta(%{__meta__: meta}), do: Kvasir.Command.Meta.encode(meta)
 
@@ -44,8 +44,13 @@ defmodule Kvasir.Command.Encodings.Raw do
       else: {:error, :unknown_command}
   end
 
-  defp find_command(command) when is_binary(command),
-    do: find_command(Module.concat("Elixir", command))
+  defp find_command(command) when is_binary(command) do
+    if lookup = Kvasir.Command.Registry.lookup(command) do
+      find_command(lookup)
+    else
+      find_command(Module.concat("Elixir", command))
+    end
+  end
 
   defp do_decode([], _data, acc, process), do: process.(acc)
 
