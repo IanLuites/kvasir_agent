@@ -99,8 +99,17 @@ defmodule Kvasir.Agent.Instance do
         state = %{state | offset: updated_offset, agent_state: updated_state}
         {:noreply, notify_offset_callbacks(state, updated_offset)}
 
-      _ ->
+      :ok ->
         {:noreply, state}
+
+      {:error, reason} ->
+        if Kvasir.Event.on_error(:on_error) == :halt do
+          Logger.error(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
+          {:stop, :invalid_event, state}
+        else
+          Logger.warn(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
+          {:noreply, state}
+        end
     end
   end
 
