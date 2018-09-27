@@ -129,7 +129,7 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp commit_events(state = %{client: client, topic: topic, id: id}, events, ref) do
-    client.produce(topic, 0, id, Enum.map(events, &prepare_event(&1, ref, state)))
+    events |> Enum.map(&prepare_event(&1, ref, state)) |> client.produce()
   end
 
   defp prepare_event(event, ref, %{topic: topic, id: id, partition: partition}) do
