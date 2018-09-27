@@ -137,7 +137,7 @@ defmodule Kvasir.Agent.Instance do
     %{state | keep_alive: Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)}
   end
 
-  defp commit_events(state = %{client: client, topic: topic, id: id}, events, ref) do
+  defp commit_events(state = %{client: client}, events, ref) do
     events |> Enum.map(&prepare_event(&1, ref, state)) |> client.produce()
   end
 
