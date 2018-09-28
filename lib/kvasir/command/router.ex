@@ -41,6 +41,8 @@ defmodule Kvasir.Command.Router do
     if dispatches == [], do: Logger.warn(fn -> "#{env.module}: No dispatches set." end)
 
     quote do
+      @doc false
+      @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
       def do_dispatch(command = %type{}),
         do: dispatch_match(@dispatch, inspect(type), command, no_match: @no_match)
