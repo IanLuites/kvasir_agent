@@ -15,7 +15,7 @@ defmodule Kvasir.Command do
 
   @doc @moduledoc
   defmacro __using__(_opts \\ []) do
-    quote do
+    quote location: :keep do
       require Kvasir.Command
       import Kvasir.Command, only: [command: 2]
       import Kvasir.Command.Encodings.Raw, only: [decode: 2]
@@ -35,7 +35,7 @@ defmodule Kvasir.Command do
   defmacro command(type, do: block) do
     registry = Module.concat(Kvasir.Command.Registry, __CALLER__.module)
 
-    quote do
+    quote location: :keep do
       @command_type unquote(Kvasir.Util.name(type))
       @before_compile Kvasir.Command
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
@@ -67,8 +67,6 @@ defmodule Kvasir.Command do
                    )
       defstruct Enum.map(@struct_fields, &elem(&1, 0)) ++ [__meta__: %Kvasir.Command.Meta{}]
 
-      @behaviour Kvasir.Command
-
       defimpl Jason.Encoder, for: __MODULE__ do
         alias Jason.EncodeError
         alias Jason.Encoder.Map
@@ -81,6 +79,17 @@ defmodule Kvasir.Command do
           end
         end
       end
+
+      @doc false
+      @impl Kvasir.Command
+      def validate(command), do: :ok
+
+      @behaviour Kvasir.Command
+      defoverridable validate: 1
+
+      @doc false
+      @spec create_from(map) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+      def create_from(data), do: decode(%{payload: data, type: __MODULE__}, process: :create)
     end
   end
 
@@ -92,14 +101,8 @@ defmodule Kvasir.Command do
       |> Enum.map(&elem(&1, 1))
       |> Enum.sort()
 
-    quote do
+    quote location: :keep do
       unquote(creation(arities))
-
-      @doc false
-      @impl Kvasir.Command
-      def validate(command), do: :ok
-
-      defoverridable validate: 1
 
       @doc false
       @impl Kvasir.Command
@@ -107,9 +110,6 @@ defmodule Kvasir.Command do
       def __command__(:fields), do: @struct_fields
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
-
-      @doc false
-      def create_from(data), do: decode(%{payload: data, type: __MODULE__}, process: :create)
     end
   end
 
@@ -118,13 +118,13 @@ defmodule Kvasir.Command do
       @doc ~S"""
       Create this command.
       """
-      # @impl Kvasir.Command
+      @impl Kvasir.Command
       def create(data), do: Kvasir.Command.create(__MODULE__, [data])
 
       @doc ~S"""
       See: `create/1`.
       """
-      # @impl Kvasir.Command
+      @impl Kvasir.Command
       def create!(data), do: Kvasir.Command.create!(__MODULE__, [data])
 
       @doc false
