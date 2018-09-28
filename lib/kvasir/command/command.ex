@@ -118,13 +118,13 @@ defmodule Kvasir.Command do
       @doc ~S"""
       Create this command.
       """
-      @impl Kvasir.Command
+      # @impl Kvasir.Command
       def create(data), do: Kvasir.Command.create(__MODULE__, [data])
 
       @doc ~S"""
       See: `create/1`.
       """
-      @impl Kvasir.Command
+      # @impl Kvasir.Command
       def create!(data), do: Kvasir.Command.create!(__MODULE__, [data])
 
       @doc false
