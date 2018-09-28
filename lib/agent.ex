@@ -46,13 +46,29 @@ defmodule Kvasir.Agent do
 
         unquote(auto)
 
+        @doc false
+        @spec child_spec(Keyword.t()) :: map
         def child_spec(_opts \\ []), do: Agent.child_spec(__agent__(:config))
 
-        def open(id), do: Supervisor.open(__agent__(:config), id)
+        @doc false
+        @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+        @impl Kvasir.Command.Dispatcher
         def do_dispatch(command), do: Manager.dispatch(__MODULE__, command)
+
+        @doc ~S"""
+        Start and return the pid of an agent instance.
+        """
+        @spec open(any) :: {:ok, pid} | {:error, atom}
+        def open(id), do: Supervisor.open(__agent__(:config), id)
+
+        @doc ~S"""
+        Inspect the current state of an agent instance.
+        """
+        @spec inspect(any) :: {:ok, term} | {:error, atom}
         def inspect(id), do: Manager.inspect(__agent__(:config), id)
 
         @doc false
+        @spec __agent__(atom) :: term
         def __agent__(:config),
           do: %{
             agent: __MODULE__,
