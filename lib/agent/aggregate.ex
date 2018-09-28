@@ -47,6 +47,7 @@ defmodule Kvasir.Agent.Aggregate do
 
       defoverridable base: 1
       @doc false
+      @spec __aggregate__(atom) :: term
       def __aggregate__(:config),
         do: %{
           struct: __MODULE__,
