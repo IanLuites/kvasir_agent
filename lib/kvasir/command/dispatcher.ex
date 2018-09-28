@@ -12,6 +12,8 @@ defmodule Kvasir.Command.Dispatcher do
       @doc ~S"""
       Dispatch a command.
       """
+      @spec dispatch(Kvasir.Command.t(), Keyword.t()) ::
+              {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
       def dispatch(command, opts \\ []),
         do: Kvasir.Command.Dispatcher.dispatch(__MODULE__, command, opts)
