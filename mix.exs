@@ -57,19 +57,13 @@ defmodule Kvasir.Agent.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
-      mod: {Kvasir.Agent.Application, []}
+      extra_applications: [:logger]
     ]
   end
 
   defp deps do
-    if System.get_env("KVASIR_LOCAL_PUBLISH") == "a-ok" do
-      [
-        {:kvasir, ">= #{@version}", optional: true},
-        {:ex_doc, ">= 0.0.0", only: :dev}
-      ]
-    else
-      []
-    end
+    [
+      {:kvasir, git: "https://github.com/IanLuites/kvasir", branch: "release/v1.0"}
+    ]
   end
 end
