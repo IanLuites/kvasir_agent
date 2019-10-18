@@ -3,6 +3,11 @@ defmodule Kvasir.Agent.Cache.ETS do
   @storage_table __MODULE__
 
   @impl Kvasir.Agent.Cache
+  def init(_agent, _) do
+    ensure_storage_table_created()
+  end
+
+  @impl Kvasir.Agent.Cache
   def save(module, id, data, offset) do
     ensure_storage_table_created()
 
