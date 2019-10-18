@@ -173,7 +173,7 @@ defmodule Kvasir.Command do
 
       @doc false
       # @impl Kvasir.Command
-      def factory(payload) when is_list(data), do: {:ok, Map.new(payload)}
+      def factory(payload) when is_list(payload), do: {:ok, Map.new(payload)}
       def factory(payload), do: {:ok, payload}
     end
   end
