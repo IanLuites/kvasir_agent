@@ -18,23 +18,30 @@ defmodule Kvasir.Command do
     quote location: :keep do
       require Kvasir.Command
       import Kvasir.Command, only: [command: 2]
-      import Kvasir.Command.Encodings.Raw, only: [decode: 2]
+      # import Kvasir.Command.Encodings.Raw, only: [decode: 2]
     end
   end
 
   defmacro field(name, type \\ :string, opts \\ []) do
+    opts = Keyword.put_new(opts, :sensitive, false)
+
     quote do
       Module.put_attribute(
         __MODULE__,
         :command_fields,
-        {unquote(name), unquote(type), unquote(opts)}
+        {unquote(name), unquote(Kvasir.Type.lookup(type)),
+         unquote(opts)
+         |> Keyword.put_new_lazy(:doc, fn ->
+           case Module.delete_attribute(__MODULE__, :doc) do
+             {_, doc} -> doc
+             _ -> nil
+           end
+         end)}
       )
     end
   end
 
   defmacro command(type, do: block) do
-    registry = Module.concat(Kvasir.Command.Registry, __CALLER__.module)
-
     quote location: :keep do
       @command_type unquote(Kvasir.Util.name(type))
       @before_compile Kvasir.Command
@@ -47,18 +54,12 @@ defmodule Kvasir.Command do
         :ok
       end
 
-      defmodule unquote(registry) do
-        @moduledoc false
+      Module.register_attribute(__MODULE__, :__command__, persist: true)
+      Module.put_attribute(__MODULE__, :__command__, unquote(Kvasir.Util.name(type)))
 
-        @doc false
-        @spec type :: String.t()
-        def type, do: unquote(Kvasir.Util.name(type))
-
-        @doc false
-        @spec module :: module
-        def module, do: unquote(__CALLER__.module)
-      end
-
+      @sensitive_fields @command_fields
+                        |> Enum.filter(fn {_, _, o} -> o[:sensitive] end)
+                        |> Enum.map(&elem(&1, 0))
       @struct_fields Enum.reverse(@command_fields)
       @instance_id Enum.find_value(
                      @command_fields,
@@ -73,7 +74,7 @@ defmodule Kvasir.Command do
         alias Kvasir.Command.Encoder
 
         def encode(value, opts) do
-          case Encoder.encode(value, encoding: :raw) do
+          case Encoder.encode(value) do
             {:ok, data} -> Map.encode(data, opts)
             {:error, error} -> %EncodeError{message: "Command Encoding Error: #{error}"}
           end
@@ -89,7 +90,8 @@ defmodule Kvasir.Command do
 
       @doc false
       @spec create_from(map) :: {:ok, Kvasir.Command.t()} | {:error, atom}
-      def create_from(data), do: decode(%{payload: data, type: __MODULE__}, process: :create)
+      def create_from(data),
+        do: Kvasir.Command.Encoder.decode(%{payload: data, type: __MODULE__}, process: :create)
     end
   end
 
@@ -110,6 +112,48 @@ defmodule Kvasir.Command do
       def __command__(:fields), do: @struct_fields
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
+      def __command__(:sensitive), do: @sensitive_fields
+      def __command__(:doc), do: @moduledoc
+
+      @field_type Map.new(@struct_fields, fn {k, v, _} -> {k, v} end)
+      @doc false
+      @spec __command__(atom, atom) :: term
+      def __command__(:type, field), do: @field_type[field]
+
+      defimpl Inspect, for: __MODULE__ do
+        import Inspect.Algebra
+
+        def inspect(data = %event{}, opts) do
+          a =
+            data
+            |> Map.drop(~w(__meta__ __struct__)a)
+            |> Map.new(fn {k, v} ->
+              if v != nil and k in event.__command__(:sensitive) do
+                {k, %Kvasir.Event.Sensitive{value: v, type: event.__command__(:type, k)}}
+              else
+                {k, v}
+              end
+            end)
+
+          concat([
+            {:doc_color, :doc_nil, [:reset]},
+            "⊰",
+            inspect(data.__struct__),
+            {:doc_color, :doc_nil, [:italic, :yellow]},
+            "<",
+            data.__meta__.id || "NotDispatched",
+            ">",
+            {:doc_color, :doc_nil, :reset},
+            remove(to_doc(a, opts)),
+            {:doc_color, :doc_nil, :reset},
+            "⊱"
+          ])
+        end
+
+        defp remove({a, "%{", c}), do: {a, "{", c}
+        defp remove({a, b, c}), do: {a, remove(b), c}
+        defp remove({a, b, c, d}), do: {a, remove(b), c, d}
+      end
     end
   end
 
@@ -129,6 +173,7 @@ defmodule Kvasir.Command do
 
       @doc false
       # @impl Kvasir.Command
+      def factory(payload) when is_list(data), do: {:ok, Map.new(payload)}
       def factory(payload), do: {:ok, payload}
     end
   end

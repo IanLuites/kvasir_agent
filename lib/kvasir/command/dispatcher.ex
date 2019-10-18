@@ -46,7 +46,7 @@ defmodule Kvasir.Command.Dispatcher do
 
   defp set_id(command), do: update_meta(command, :id, generate_id())
 
-  defp set_wait(command, nil), do: command
+  defp set_wait(command, nil), do: set_wait(command, :dispatch)
 
   defp set_wait(command, wait) when wait in ~w(dispatch execute apply)a,
     do: update_meta(command, :wait, wait)
