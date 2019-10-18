@@ -55,19 +55,7 @@ defmodule Kvasir.Agent.Manager do
   end
 
   @impl GenServer
-  def init(config) do
-    spawn(fn ->
-      config.topic
-      |> config.client.stream()
-      |> Enum.each(fn event ->
-        if agent = config.registry.whereis(config.agent, event.__meta__.key) do
-          send(agent, {:event, event})
-        end
-      end)
-    end)
-
-    {:ok, config}
-  end
+  def init(config), do: {:ok, config}
 
   @impl GenServer
   def handle_call({:command, id, command}, {from, _ref}, config) do

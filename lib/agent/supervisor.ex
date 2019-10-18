@@ -9,7 +9,7 @@ defmodule Kvasir.Agent.Supervisor do
   def open(config = %{registry: registry}, id), do: registry.start_child(config, id)
 
   # @spec init(module, module) ::
-  def init(config = %{agent: agent}) do
+  def init(config = %{agent: agent, cache: {cache, cache_opts}}) do
     children = [
       %{
         id: :manager,
@@ -21,6 +21,9 @@ defmodule Kvasir.Agent.Supervisor do
       }
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    case cache.init(agent, agent.config(:cache, cache_opts)) do
+      :ok -> Supervisor.init(children, strategy: :one_for_one)
+      {:ok, child} -> Supervisor.init([child | children], strategy: :one_for_one)
+    end
   end
 end

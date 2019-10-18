@@ -5,14 +5,21 @@ defmodule Kvasir.Agent.Instance do
   @keep_alive 60_000
 
   def start_agent(config, id, opts) do
-    config = Map.put(config, :partition, 0)
-    GenServer.start_link(__MODULE__, Map.put(config, :id, id), opts)
+    t = config.source.__topics__()[config.topic]
+
+    config =
+      config
+      |> Map.put(:id, id)
+      |> Map.put(:partition, t.key.partition(id, t.partitions))
+      |> Map.update!(:cache, &elem(&1, 0))
+
+    GenServer.start_link(__MODULE__, config, opts)
   end
 
   @impl GenServer
   def init(
         state = %{
-          client: client,
+          source: source,
           agent: agent,
           id: id,
           cache: cache,
@@ -21,7 +28,7 @@ defmodule Kvasir.Agent.Instance do
         }
       ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
-    {offset, agent_state} = load_state(client, cache, topic, model, agent, id)
+    {offset, agent_state} = load_state(source, cache, topic, model, agent, id)
     cache.save(agent, id, agent_state, offset)
 
     state =
@@ -34,25 +41,27 @@ defmodule Kvasir.Agent.Instance do
     {:ok, Map.put(state, :keep_alive, keep_alive)}
   end
 
-  defp load_state(client, cache, topic, model, agent, id) do
+  defp load_state(source, cache, topic, model, agent, id) do
     case cache.load(agent, id) do
       {:ok, offset, state} ->
-        Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{offset}" end)
-        build_state(client, topic, model, id, offset, state)
+        Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{inspect(offset)}" end)
+        build_state(source, topic, model, id, offset, state)
 
       {:error, reason} ->
         Logger.debug(fn -> "Agent<#{id}>: No State Loaded: #{reason}" end)
-        build_state(client, topic, model, id, :earliest, model.base(id))
+        build_state(source, topic, model, id, nil, model.base(id))
     end
   end
 
-  defp build_state(client, topic, model, id, offset, original_state) do
+  defp build_state(source, topic, model, id, offset, original_state) do
+    IO.inspect(id, label: "Set Key")
+
     topic
-    |> client.stream(from: offset, to: :last)
-    |> Stream.filter(&(&1.__meta__.key == id))
-    |> Enum.reduce({offset, original_state}, fn event, {offset, state} ->
+    |> source.stream(from: offset, to: :last, key: id)
+    |> Enum.reduce({offset || Kvasir.Offset.create(), original_state}, fn event,
+                                                                          {offset, state} ->
       with {:ok, updated_state} <- model.apply(state, event) do
-        {Offset.set(offset, event.__meta__.offset), updated_state}
+        {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state}
       end
     end)
   end
@@ -84,33 +93,17 @@ defmodule Kvasir.Agent.Instance do
 
     send(from, {:command, ref, response})
 
-    {:noreply, reset_keep_alive(state)}
+    case response do
+      {:ok, events} ->
+        with {:ok, state} <- apply_events(events, state), do: {:noreply, reset_keep_alive(state)}
+
+      _ ->
+        {:noreply, reset_keep_alive(state)}
+    end
   end
 
   def handle_info({:event, event}, state) do
-    Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
-    offset = event.__meta__.offset
-    newer = Offset.compare(state.offset, offset) == :lt
-
-    case newer && state.model.apply(state.agent_state, event) do
-      {:ok, updated_state} ->
-        updated_offset = Offset.set(state.offset, offset)
-        state.cache.save(state.agent, state.id, updated_state, updated_offset)
-        state = %{state | offset: updated_offset, agent_state: updated_state}
-        {:noreply, notify_offset_callbacks(state, updated_offset)}
-
-      :ok ->
-        {:noreply, state}
-
-      {:error, reason} ->
-        if Kvasir.Event.on_error(:on_error) == :halt do
-          Logger.error(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
-          {:stop, :invalid_event, state}
-        else
-          Logger.warn(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
-          {:noreply, state}
-        end
-    end
+    with {:ok, state} <- apply_events([event], state), do: {:noreply, state}
   end
 
   def handle_info({:offset_callback, from, ref, offset}, state) do
@@ -128,6 +121,40 @@ defmodule Kvasir.Agent.Instance do
     {:reply, state.agent_state, state}
   end
 
+  defp apply_events(events, state, offset \\ nil)
+
+  defp apply_events([], state, offset),
+    do: {:ok, if(offset, do: notify_offset_callbacks(state, offset), else: state)}
+
+  defp apply_events([event | events], state, c_offset) do
+    Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
+    %{offset: offset, partition: partition} = event.__meta__
+
+    if Offset.get(state.offset, event.__meta__.partition) < offset do
+      case state.model.apply(state.agent_state, event) do
+        {:ok, updated_state} ->
+          updated_offset = Offset.set(state.offset, partition, offset)
+          state.cache.save(state.agent, state.id, updated_state, updated_offset)
+          state = %{state | offset: updated_offset, agent_state: updated_state}
+          apply_events(events, state, updated_offset)
+
+        :ok ->
+          apply_events(events, state, c_offset)
+
+        {:error, reason} ->
+          if Kvasir.Event.on_error(:on_error) == :halt do
+            Logger.error(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
+            {:stop, :invalid_event, state}
+          else
+            Logger.warn(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
+            apply_events(events, state, c_offset)
+          end
+      end
+    else
+      apply_events(events, state, c_offset)
+    end
+  end
+
   defp pause_keep_alive(%{keep_alive: nil}), do: :ok
   defp pause_keep_alive(%{keep_alive: ref}), do: Process.cancel_timer(ref)
 
@@ -137,12 +164,14 @@ defmodule Kvasir.Agent.Instance do
     %{state | keep_alive: Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)}
   end
 
-  defp commit_events(state = %{client: client}, events, ref) do
-    events |> Enum.map(&prepare_event(&1, ref, state)) |> client.produce()
+  defp commit_events(state = %{source: source, topic: topic}, events, ref) do
+    events
+    |> Enum.map(&prepare_event(&1, ref, state))
+    |> Enum.map(&source.publish(topic, &1))
   end
 
-  defp prepare_event(event, ref, %{topic: topic, id: id, partition: partition}) do
-    meta = %{event.__meta__ | command: ref, topic: topic, partition: partition, key: id}
+  defp prepare_event(event, ref, %{id: id, partition: partition}) do
+    meta = %{event.__meta__ | command: ref, partition: partition, key: id}
     %{event | __meta__: meta}
   end
 

@@ -14,6 +14,7 @@ defmodule Kvasir.Agent.Aggregate do
 
     quote do
       @behaviour Kvasir.Agent.Aggregate
+      @__struct__ unquote(opts[:struct]) || __MODULE__
       import Kvasir.Agent.Aggregate, only: [aggregate: 1]
 
       if unquote(commands), do: defdelegate(execute(state, command), to: unquote(commands))
@@ -21,9 +22,22 @@ defmodule Kvasir.Agent.Aggregate do
     end
   end
 
-  defmacro field(name, type) do
+  defmacro field(name, type \\ :string, opts \\ []) do
+    opts = Keyword.put_new(opts, :sensitive, false)
+
     quote do
-      Module.put_attribute(__MODULE__, :aggregate_fields, {unquote(name), unquote(type)})
+      Module.put_attribute(
+        __MODULE__,
+        :aggregate_fields,
+        {unquote(name), unquote(Kvasir.Type.lookup(type)),
+         unquote(opts)
+         |> Keyword.put_new_lazy(:doc, fn ->
+           case Module.delete_attribute(__MODULE__, :doc) do
+             {_, doc} -> doc
+             _ -> nil
+           end
+         end)}
+      )
     end
   end
 
@@ -32,36 +46,41 @@ defmodule Kvasir.Agent.Aggregate do
       Module.register_attribute(__MODULE__, :aggregate_fields, accumulate: true)
 
       try do
-        import Kvasir.Agent.Aggregate, only: [field: 2]
+        import Kvasir.Agent.Aggregate, only: [field: 1, field: 2, field: 3]
         unquote(block)
       after
         :ok
       end
 
-      @struct_fields Enum.reverse(@aggregate_fields)
-      defstruct Enum.map(@struct_fields, &elem(&1, 0))
+      if @__struct__ == __MODULE__ do
+        @struct_fields Enum.reverse(@aggregate_fields)
+        defstruct Enum.map(@struct_fields, &elem(&1, 0))
+
+        defimpl Jason.Encoder, for: __MODULE__ do
+          def encode(value, opts) do
+            Jason.Encode.map(Map.from_struct(value), opts)
+          end
+        end
+      else
+        @struct_fields []
+      end
 
       @doc false
       @impl Kvasir.Agent.Aggregate
-      def base(_id), do: %__MODULE__{}
+      def base(_id), do: %@__struct__{}
 
       defoverridable base: 1
+
       @doc false
       @spec __aggregate__(atom) :: term
       def __aggregate__(:config),
         do: %{
-          struct: __MODULE__,
+          struct: @__struct__,
           fields: @struct_fields
         }
 
-      def __aggregate__(:struct), do: __MODULE__
+      def __aggregate__(:struct), do: @__struct__
       def __aggregate__(:fields), do: @struct_fields
-
-      defimpl Jason.Encoder, for: __MODULE__ do
-        def encode(value, opts) do
-          Jason.Encode.map(Map.from_struct(value), opts)
-        end
-      end
     end
   end
 end
