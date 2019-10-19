@@ -18,12 +18,14 @@ defmodule Kvasir.Agent do
         use Kvasir.Command.Dispatcher
         alias Kvasir.Agent
         alias Kvasir.Agent.{Manager, Supervisor}
+        require unquote(source)
 
         @source unquote(source)
         @topic unquote(topic)
         @cache unquote({cache, Macro.escape(cache_opts)})
         @registry unquote(registry)
         @model unquote(model)
+        @key @source.__topics__()[@topic].key
 
         @doc false
         @spec child_spec(Keyword.t()) :: map
@@ -63,10 +65,12 @@ defmodule Kvasir.Agent do
             source: @source,
             model: @model,
             registry: @registry,
-            topic: @topic
+            topic: @topic,
+            key: @key
           }
 
         def __agent__(:topic), do: @topic
+        def __agent__(:key), do: @key
       end
     end
   end

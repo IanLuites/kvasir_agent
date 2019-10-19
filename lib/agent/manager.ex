@@ -7,8 +7,10 @@ defmodule Kvasir.Agent.Manager do
     GenServer.start_link(__MODULE__, config, name: manager(config.agent))
   end
 
-  def dispatch(agent, command = %{__meta__: %{scope: {:instance, id}}}) do
-    with :ok <- GenServer.call(manager(agent), {:command, id, command}) do
+  def dispatch(agent, command = %{__meta__: meta = %{scope: {:instance, id}}}) do
+    with {:ok, id} <- agent.__agent__(:key).parse(id, []),
+         command = %{command | __meta__: %{meta | scope: {:instance, id}}},
+         :ok <- GenServer.call(manager(agent), {:command, id, command}) do
       after_dispatch(agent, command, command.__meta__.wait)
     end
   end

@@ -54,8 +54,6 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp build_state(source, topic, model, id, offset, original_state) do
-    IO.inspect(id, label: "Set Key")
-
     topic
     |> source.stream(from: offset, to: :last, key: id)
     |> Enum.reduce({offset || Kvasir.Offset.create(), original_state}, fn event,
@@ -69,7 +67,7 @@ defmodule Kvasir.Agent.Instance do
   @impl GenServer
   def handle_info(
         {:command, from, command},
-        state = %{agent_state: agent_state, model: model}
+        state = %{agent_state: agent_state, model: model, partition: p}
       ) do
     pause_keep_alive(state)
     Logger.debug(fn -> "Agent<#{state.id}>: Command: #{inspect(command)}" end)
@@ -91,13 +89,13 @@ defmodule Kvasir.Agent.Instance do
           error
       end
 
-    send(from, {:command, ref, response})
-
     case response do
       {:ok, events} ->
+        send(from, {:command, ref, {:ok, Offset.create(p, List.last(events).__meta__.offset)}})
         with {:ok, state} <- apply_events(events, state), do: {:noreply, reset_keep_alive(state)}
 
       _ ->
+        send(from, {:command, ref, response})
         {:noreply, reset_keep_alive(state)}
     end
   end
@@ -167,7 +165,7 @@ defmodule Kvasir.Agent.Instance do
   defp commit_events(state = %{source: source, topic: topic}, events, ref) do
     events
     |> Enum.map(&prepare_event(&1, ref, state))
-    |> Enum.map(&source.publish(topic, &1))
+    |> EnumX.map(&source.publish(topic, &1))
   end
 
   defp prepare_event(event, ref, %{id: id, partition: partition}) do
