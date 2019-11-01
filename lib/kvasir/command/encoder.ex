@@ -12,6 +12,11 @@ defmodule Kvasir.Command.Encoder do
     end
   end
 
+  def decode(command, payload, meta) do
+    with {:ok, data} <- Serializer.decode(command.__command__(:fields), payload),
+         do: {:ok, struct!(command, Map.put(data, :__meta__, meta))}
+  end
+
   def decode(data, opts \\ []) do
     with {:ok, command} <- find_command(MapX.get(data, :type)),
          {:ok, payload} <-

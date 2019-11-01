@@ -205,7 +205,7 @@ defmodule Kvasir.Command do
   """
   def create(command, data) do
     with {:ok, payload} <- apply(command, :factory, data),
-         result <- struct!(command, Map.put(payload, :__meta__, %Meta{created: utc_now()})),
+         {:ok, result} <- decode(command, payload, %Meta{created: utc_now()}),
          :ok <- command.validate(result) do
       {:ok, result}
     end
@@ -233,4 +233,5 @@ defmodule Kvasir.Command do
 
   defdelegate encode(value, opts \\ []), to: Encoder
   defdelegate decode(value, opts \\ []), to: Encoder
+  defdelegate decode(command, payload, meta), to: Encoder
 end
