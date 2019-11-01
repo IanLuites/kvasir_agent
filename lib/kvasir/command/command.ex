@@ -83,6 +83,7 @@ defmodule Kvasir.Command do
 
       @doc false
       @impl Kvasir.Command
+      @spec validate(struct) :: :ok | {:error, term}
       def validate(command), do: :ok
 
       @behaviour Kvasir.Command
@@ -163,16 +164,19 @@ defmodule Kvasir.Command do
       Create this command.
       """
       # @impl Kvasir.Command
+      @spec create(term) :: {:ok, struct} | {:error, term}
       def create(data), do: Kvasir.Command.create(__MODULE__, [data])
 
       @doc ~S"""
       See: `create/1`.
       """
       # @impl Kvasir.Command
+      @spec create!(term) :: struct | no_return
       def create!(data), do: Kvasir.Command.create!(__MODULE__, [data])
 
       @doc false
       # @impl Kvasir.Command
+      @spec factory(term) :: {:ok, term} | {:error, term}
       def factory(payload) when is_list(payload), do: {:ok, Map.new(payload)}
       def factory(payload), do: {:ok, payload}
     end
@@ -182,6 +186,32 @@ defmodule Kvasir.Command do
     Enum.reduce(arities, nil, fn arity, acc ->
       data = 1..arity |> Enum.map(&Macro.var(:"arg#{&1}", nil))
 
+      spec_create =
+        {:@, [context: Elixir, import: Kernel],
+         [
+           {:spec, [context: Elixir],
+            [
+              {:"::", [],
+               [
+                 {:create, [], Enum.map(1..arity, fn _ -> {:term, [], Elixir} end)},
+                 {:|, [], [ok: {:struct, [], Elixir}, error: {:term, [], Elixir}]}
+               ]}
+            ]}
+         ]}
+
+      spec_create! =
+        {:@, [context: Elixir, import: Kernel],
+         [
+           {:spec, [context: Elixir],
+            [
+              {:"::", [],
+               [
+                 {:create!, [], Enum.map(1..arity, fn _ -> {:term, [], Elixir} end)},
+                 {:|, [], [{:struct, [], Elixir}, error: {:term, [], Elixir}]}
+               ]}
+            ]}
+         ]}
+
       quote do
         unquote(acc)
 
@@ -189,12 +219,14 @@ defmodule Kvasir.Command do
         Create this command.
         """
         # @impl Kvasir.Command
+        unquote(spec_create)
         def create(unquote_splicing(data)), do: Kvasir.Command.create(__MODULE__, unquote(data))
 
         @doc """
         See: `create/#{unquote(arity)}`.
         """
         # @impl Kvasir.Command
+        unquote(spec_create!)
         def create!(unquote_splicing(data)), do: Kvasir.Command.create!(__MODULE__, unquote(data))
       end
     end)
