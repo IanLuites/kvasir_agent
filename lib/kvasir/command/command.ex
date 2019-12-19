@@ -109,6 +109,7 @@ defmodule Kvasir.Command do
 
       @doc false
       @impl Kvasir.Command
+      @spec __command__(atom) :: term
       def __command__(:type), do: @command_type
       def __command__(:fields), do: @struct_fields
       def __command__(:instance_id), do: @instance_id
@@ -161,14 +162,29 @@ defmodule Kvasir.Command do
   defp creation([]) do
     quote do
       @doc ~S"""
-      Create this command.
+      Create this command based on the given data.
+
+      ## Example
+
+      ```elixir
+      iex> create(key: value)
+      {:ok, <command>}
+      ```
       """
       # @impl Kvasir.Command
       @spec create(term) :: {:ok, struct} | {:error, term}
       def create(data), do: Kvasir.Command.create(__MODULE__, [data])
 
       @doc ~S"""
+      Create this command based on the given data.
       See: `create/1`.
+
+      ## Example
+
+      ```elixir
+      iex> create!(key: value)
+      <command>
+      ```
       """
       # @impl Kvasir.Command
       @spec create!(term) :: struct | no_return
@@ -215,15 +231,35 @@ defmodule Kvasir.Command do
       quote do
         unquote(acc)
 
-        @doc ~S"""
-        Create this command.
+        @doc """
+        Create this command based on the given data.
+
+        ## Example
+
+        ```elixir
+        iex> create(#{unquote(1..arity |> Enum.map(&"arg#{&1}") |> Enum.join(", "))})
+        {:ok, <command>}
+        ```
+
+        ## Note
+
+
         """
         # @impl Kvasir.Command
         unquote(spec_create)
         def create(unquote_splicing(data)), do: Kvasir.Command.create(__MODULE__, unquote(data))
 
         @doc """
+        Create this command based on the given data.
+
         See: `create/#{unquote(arity)}`.
+
+        ## Example
+
+        ```elixir
+        iex> create!(#{unquote(1..arity |> Enum.map(&"arg#{&1}") |> Enum.join(", "))})
+        <command>
+        ```
         """
         # @impl Kvasir.Command
         unquote(spec_create!)

@@ -38,18 +38,41 @@ defmodule Kvasir.Agent do
 
         @doc ~S"""
         Start and return the pid of an agent instance.
+
+        ## Examples
+
+        ```elixir
+        iex> open(<id>)
+        {:ok, #PID<0.109.0>}
+        ```
         """
         @spec open(any) :: {:ok, pid} | {:error, atom}
         def open(id), do: Supervisor.open(__agent__(:config), id)
 
         @doc ~S"""
         Inspect the current state of an agent instance.
+
+        The agent is opened based on the given id.
+
+        ## Examples
+
+        ```elixir
+        iex> inspect(<id>)
+        {:ok, <state>}
+        ```
         """
         @spec inspect(any) :: {:ok, term} | {:error, atom}
         def inspect(id), do: Manager.inspect(__agent__(:config), id)
 
         @doc ~S"""
         Dynamically configure specific components.
+
+        ## Examples
+
+        ```elixir
+        iex> config(:source, [])
+        {:ok, []}
+        ```
         """
         @spec config(component :: atom, opts :: Keyword.t()) :: Keyword.t()
         def config(_component, opts), do: opts
