@@ -5,7 +5,7 @@ defmodule Kvasir.Command do
   import NaiveDateTime, only: [utc_now: 0]
 
   @typedoc @moduledoc
-  @type t :: term
+  @type t :: struct
 
   @callback __command__(atom) :: any
   # @callback create(any) :: {:ok, t} | {:error, atom}
