@@ -83,7 +83,7 @@ defmodule Kvasir.Command do
 
       @doc false
       @impl Kvasir.Command
-      @spec validate(struct) :: :ok | {:error, term}
+      @spec validate(struct) :: :ok | {:error, atom}
       def validate(command), do: :ok
 
       @behaviour Kvasir.Command
