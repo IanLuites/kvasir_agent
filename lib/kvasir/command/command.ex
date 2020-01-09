@@ -46,7 +46,12 @@ defmodule Kvasir.Command do
   defmacro command(type, opts, do: block), do: create_command(__CALLER__, type, block, opts)
 
   defp create_command(caller, type, block, opts) do
-    emits = if e = opts[:emits], do: Enum.map(e, &Macro.expand(&1, caller)), else: []
+    emits =
+      case opts[:emits] do
+        nil -> []
+        e when is_list(e) -> Enum.map(e, &Macro.expand(&1, caller))
+        e -> [Macro.expand(e, caller)]
+      end
 
     {emits, pre_fill} =
       if e = opts[:for] do
