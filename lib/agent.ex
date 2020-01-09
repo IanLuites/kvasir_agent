@@ -11,9 +11,7 @@ defmodule Kvasir.Agent do
     registry = Kvasir.Agent.Config.registry!(opts)
 
     # Disabled environments
-    if Mix.env() in (opts[:disable] || []) do
-      nil
-    else
+    unless Mix.env() in (opts[:disable] || []) do
       quote do
         use Kvasir.Command.Dispatcher
         alias Kvasir.Agent
