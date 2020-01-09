@@ -17,7 +17,7 @@ defmodule Kvasir.Command do
   defmacro __using__(_opts \\ []) do
     quote location: :keep do
       require Kvasir.Command
-      import Kvasir.Command, only: [command: 2]
+      import Kvasir.Command, only: [command: 2, command: 3]
       # import Kvasir.Command.Encodings.Raw, only: [decode: 2]
     end
   end
@@ -41,14 +41,38 @@ defmodule Kvasir.Command do
     end
   end
 
-  defmacro command(type, do: block) do
+  defmacro command(type, do: block), do: create_command(__CALLER__, type, block, [])
+  defmacro command(type, opts), do: create_command(__CALLER__, type, nil, opts)
+  defmacro command(type, opts, do: block), do: create_command(__CALLER__, type, block, opts)
+
+  defp create_command(caller, type, block, opts) do
+    emits = if e = opts[:emits], do: Enum.map(e, &Macro.expand(&1, caller)), else: []
+
+    {emits, pre_fill} =
+      if e = opts[:for] do
+        e = Macro.expand(e, caller)
+        fields = e.__event__(:fields)
+
+        {[e | emits],
+         Enum.reduce(fields, nil, fn {n, t, o}, acc ->
+           quote do
+             unquote(acc)
+             field unquote(n), unquote(t), unquote(Macro.escape(o))
+           end
+         end)}
+      else
+        {emits, nil}
+      end
+
     quote location: :keep do
       @command_type unquote(Kvasir.Util.name(type))
+      @command_emits unquote(emits)
       @before_compile Kvasir.Command
       Module.register_attribute(__MODULE__, :command_fields, accumulate: true)
 
       try do
         import Kvasir.Command, only: [field: 1, field: 2, field: 3]
+        unquote(pre_fill)
         unquote(block)
       after
         :ok
@@ -141,6 +165,7 @@ defmodule Kvasir.Command do
       @spec __command__(atom) :: term
       def __command__(:type), do: @command_type
       def __command__(:fields), do: @struct_fields
+      def __command__(:emits), do: @command_emits
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
       def __command__(:sensitive), do: @sensitive_fields
