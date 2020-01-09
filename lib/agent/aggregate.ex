@@ -12,7 +12,7 @@ defmodule Kvasir.Agent.Aggregate do
     commands = opts[:command]
     events = opts[:event]
 
-    quote do
+    quote location: :keep do
       @behaviour Kvasir.Agent.Aggregate
       @__struct__ unquote(opts[:struct]) || __MODULE__
       import Kvasir.Agent.Aggregate, only: [aggregate: 1]
@@ -22,38 +22,19 @@ defmodule Kvasir.Agent.Aggregate do
     end
   end
 
-  defmacro field(name, type \\ :string, opts \\ []) do
-    opts = Keyword.put_new(opts, :sensitive, false)
-
-    quote do
-      Module.put_attribute(
-        __MODULE__,
-        :aggregate_fields,
-        {unquote(name), unquote(Kvasir.Type.lookup(type)),
-         unquote(opts)
-         |> Keyword.put_new_lazy(:doc, fn ->
-           case Module.delete_attribute(__MODULE__, :doc) do
-             {_, doc} -> doc
-             _ -> nil
-           end
-         end)}
-      )
-    end
-  end
-
   defmacro aggregate(do: block) do
-    quote do
-      Module.register_attribute(__MODULE__, :aggregate_fields, accumulate: true)
+    quote location: :keep do
+      Module.register_attribute(__MODULE__, :fields, accumulate: true)
 
       try do
-        import Kvasir.Agent.Aggregate, only: [field: 1, field: 2, field: 3]
+        import Kvasir.Event, only: [field: 1, field: 2, field: 3]
         unquote(block)
       after
         :ok
       end
 
       if @__struct__ == __MODULE__ do
-        @struct_fields Enum.reverse(@aggregate_fields)
+        @struct_fields Enum.reverse(@fields)
         defstruct Enum.map(@struct_fields, &elem(&1, 0))
 
         defimpl Jason.Encoder, for: __MODULE__ do
