@@ -97,6 +97,35 @@ defmodule Kvasir.Command do
   end
 
   defmacro __before_compile__(env) do
+    config = Mix.Project.config()
+    app = Keyword.get(config, :app)
+    version = Keyword.get(config, :version)
+    docs = Keyword.get(config, :docs, [])
+    package = Keyword.get(config, :package, [])
+    dep_depth = config |> Keyword.get(:deps_path) |> Path.split() |> Enum.count()
+    path = __CALLER__.file |> Path.split() |> Enum.slice((dep_depth + 1)..-1) |> Path.join()
+
+    {hex, hexdocs} =
+      case {Keyword.get(package, :name), Keyword.get(package, :organization)} do
+        {nil, _} ->
+          nil
+
+        {app, nil} ->
+          {"https://hex.pm/packages/#{app}/#{version}",
+           "https://hexdocs.pm/#{app}/#{version}/#{inspect(__CALLER__.module)}.html"}
+
+        {app, org} ->
+          {"https://hex.pm/packages/#{org}/#{app}/#{version}",
+           "https://#{org}.hexdocs.pm/#{app}/#{version}/#{inspect(__CALLER__.module)}.html"}
+      end
+
+    source =
+      case {Keyword.get(docs, :source_url), Keyword.get(docs, :source_ref)} do
+        {nil, _} -> nil
+        {url, nil} -> url <> "/src/#{path}"
+        {url, ref} -> url <> "/src/#{ref}/#{path}"
+      end
+
     arities =
       env.module
       |> Module.definitions_in(:def)
@@ -115,7 +144,11 @@ defmodule Kvasir.Command do
       def __command__(:instance_id), do: @instance_id
       def __command__(:create), do: unquote(arities)
       def __command__(:sensitive), do: @sensitive_fields
+      def __command__(:app), do: {unquote(app), unquote(version)}
       def __command__(:doc), do: @moduledoc
+      def __command__(:hex), do: unquote(hex)
+      def __command__(:hexdocs), do: unquote(hexdocs)
+      def __command__(:source), do: unquote(source)
 
       @field_type Map.new(@struct_fields, fn {k, v, _} -> {k, v} end)
       @doc false
