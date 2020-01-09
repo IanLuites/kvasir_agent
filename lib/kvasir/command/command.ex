@@ -137,7 +137,7 @@ defmodule Kvasir.Command do
     {hex, hexdocs} =
       case {Keyword.get(package, :name), Keyword.get(package, :organization)} do
         {nil, _} ->
-          nil
+          {nil, nil}
 
         {app, nil} ->
           {"https://hex.pm/packages/#{app}/#{version}",
