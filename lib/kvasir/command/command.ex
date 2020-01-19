@@ -2,7 +2,7 @@ defmodule Kvasir.Command do
   @moduledoc ~S"""
   """
   alias Kvasir.Command.{Encoder, Meta}
-  import NaiveDateTime, only: [utc_now: 0]
+  import UTCDateTime, only: [utc_now: 0]
 
   @typedoc @moduledoc
   @type t :: struct

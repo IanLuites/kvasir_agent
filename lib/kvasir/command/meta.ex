@@ -1,10 +1,10 @@
 defmodule Kvasir.Command.Meta do
   @type t :: %__MODULE__{
           id: String.t(),
-          created: NaiveDateTime.t(),
-          dispatched: NaiveDateTime.t(),
-          executed: NaiveDateTime.t(),
-          applied: NaiveDateTime.t(),
+          created: UTCDateTime.t(),
+          dispatched: UTCDateTime.t(),
+          executed: UTCDateTime.t(),
+          applied: UTCDateTime.t(),
           scope: :global | {:instance, term},
           dispatch: :single | :multiple,
           wait: :dispatch | :execute | :apply,
@@ -59,10 +59,10 @@ defmodule Kvasir.Command.Meta do
 
   @spec parse_meta(String.t(), any) :: {atom, any}
   defp parse_meta("id", value), do: {:id, value}
-  defp parse_meta("created", value), do: {:created, NaiveDateTime.from_iso8601!(value)}
-  defp parse_meta("dispatched", value), do: {:dispatched, NaiveDateTime.from_iso8601!(value)}
-  defp parse_meta("executed", value), do: {:executed, NaiveDateTime.from_iso8601!(value)}
-  defp parse_meta("applied", value), do: {:applied, NaiveDateTime.from_iso8601!(value)}
+  defp parse_meta("created", value), do: {:created, UTCDateTime.from_iso8601!(value)}
+  defp parse_meta("dispatched", value), do: {:dispatched, UTCDateTime.from_iso8601!(value)}
+  defp parse_meta("executed", value), do: {:executed, UTCDateTime.from_iso8601!(value)}
+  defp parse_meta("applied", value), do: {:applied, UTCDateTime.from_iso8601!(value)}
   defp parse_meta("scope", "global"), do: {:scope, :global}
   defp parse_meta("scope", ["instance", value]), do: {:scope, {:instance, value}}
   defp parse_meta("dispatch", value), do: {:dispatch, String.to_existing_atom(value)}
@@ -70,5 +70,8 @@ defmodule Kvasir.Command.Meta do
   defp parse_meta("timeout", "infinity"), do: {:timeout, :infinity}
   defp parse_meta("timeout", value) when is_integer(value), do: {:timeout, value}
   defp parse_meta("offset", nil), do: {:offset, nil}
-  defp parse_meta("offset", offset), do: {:offset, Kvasir.Offset.create(offset)}
+
+  defp parse_meta("offset", offset),
+    do:
+      {:offset, Kvasir.Offset.create(Map.new(offset, fn {k, v} -> {String.to_integer(k), v} end))}
 end
