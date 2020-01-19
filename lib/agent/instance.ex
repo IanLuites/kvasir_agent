@@ -6,11 +6,12 @@ defmodule Kvasir.Agent.Instance do
 
   def start_agent(config, id, opts) do
     t = config.source.__topics__()[config.topic]
+    {:ok, p} = t.key.partition(id, t.partitions)
 
     config =
       config
       |> Map.put(:id, id)
-      |> Map.put(:partition, t.key.partition(id, t.partitions))
+      |> Map.put(:partition, p)
       |> Map.update!(:cache, &elem(&1, 0))
 
     GenServer.start_link(__MODULE__, config, opts)
