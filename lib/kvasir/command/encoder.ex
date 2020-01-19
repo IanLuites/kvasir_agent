@@ -58,4 +58,28 @@ defmodule Kvasir.Command.Encoder do
       find_command(Module.concat("Elixir", command))
     end
   end
+
+  ### Binary Encoding ###
+
+  @spec pack(Kvasir.Command.t(), Keyword.t()) :: {:ok, binary}
+  def pack(command, opts \\ [])
+
+  def pack(command = %{__meta__: m}, opts) do
+    cmd = %{
+      command
+      | __meta__: m |> Map.from_struct() |> Enum.reject(&(elem(&1, 1) == nil)) |> Map.new()
+    }
+
+    {:ok, :erlang.term_to_binary(cmd, minor_version: 2, compressed: opts[:compression] || 9)}
+  end
+
+  @spec unpack(binary) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+  def unpack(command) do
+    case :erlang.binary_to_term(command, [:safe]) do
+      cmd = %{__meta__: m} -> {:ok, %{cmd | __meta__: struct!(Kvasir.Command.Meta, m)}}
+      _ -> {:error, :invalid_command}
+    end
+  rescue
+    ArgumentError -> {:error, :invalid_command_encoding}
+  end
 end
