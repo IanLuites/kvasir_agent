@@ -100,6 +100,8 @@ defmodule Kvasir.Command.RemoteDispatcher do
           headers -> Keyword.update!(@opts, :headers, &(&1 ++ headers))
         end
 
+      url = opts[:url] || ""
+
       Code.compiler_options(ignore_module_conflict: true)
 
       Code.compile_quoted(
@@ -111,7 +113,7 @@ defmodule Kvasir.Command.RemoteDispatcher do
             @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
             def do_dispatch(command) do
               with {:ok, cmd} <- Encoder.pack(command),
-                   {:ok, %{body: result}} <- HTTPX.post(unquote(opts[:url]), cmd, unquote(b_opts)) do
+                   {:ok, %{body: result}} <- HTTPX.post(unquote(url), cmd, unquote(b_opts)) do
                 {:ok, %{command | __meta__: Meta.decode(result, command.__meta__)}}
               end
             end
