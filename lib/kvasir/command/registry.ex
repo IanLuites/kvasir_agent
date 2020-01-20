@@ -34,24 +34,48 @@ defmodule Kvasir.Command.RegistryGenerator do
       Kvasir.Command.Registry,
       quote do
         @moduledoc ~S"""
-        Kvasir Command Regsitry.
+        Kvasir Command Registry.
         """
 
         @doc ~S"""
-        Lookup commands.
+        Lookup a command by a given `type`.
+
+        ## Examples
+
+        ```elixir
+        iex> lookup("some-command")
+        <cmd>
+        iex> lookup("none-existing")
+        nil
+        ```
         """
         @spec lookup(String.t()) :: module | nil
+        def lookup(type)
         unquote(lookup)
         def lookup(_), do: nil
 
         @doc ~S"""
         List all commands.
+
+        ## Examples
+
+        ```elixir
+        iex> list()
+        [<cmd>]
+        ```
         """
         @spec list :: [module]
         def list, do: Map.values(commands())
 
         @doc ~S"""
         List all commands matching the filter.
+
+        ## Examples
+
+        ```elixir
+        iex> list(namespace: "...")
+        [<cmd>]
+        ```
         """
         @spec list(filter :: Keyword.t()) :: [module]
         def list(filter) do
@@ -78,6 +102,13 @@ defmodule Kvasir.Command.RegistryGenerator do
 
         @doc ~S"""
         All available commands indexed on type.
+
+        ## Examples
+
+        ```elixir
+        iex> commands()
+        [<cmd>]
+        ```
         """
         @spec commands :: map
         def commands, do: unquote(Macro.escape(registry))

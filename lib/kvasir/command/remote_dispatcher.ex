@@ -12,7 +12,14 @@ defmodule Kvasir.Command.RemoteDispatcher do
 
     quote do
       @doc ~S"""
+      Configure the remote dispatcher.
 
+      ## Examples
+
+      ```elixir
+      iex> configure(mode: :http, url: "...")
+      :ok
+      ```
       """
       @spec configure(Keyword.t()) :: :ok
       def configure(opts \\ []) do
@@ -37,6 +44,13 @@ defmodule Kvasir.Command.RemoteDispatcher do
 
       @doc ~S"""
       Dispatch a command to commander.
+
+      ## Examples
+
+      ```elixir
+      iex> dispatch(<cmd>, instance: <id>)
+      {:ok, <cmd>}
+      ```
       """
       @spec dispatch(Kvasir.Command.t(), Keyword.t()) ::
               {:ok, Kvasir.Command.t()} | {:error, atom}
@@ -80,16 +94,24 @@ defmodule Kvasir.Command.RemoteDispatcher do
           _ -> :http
         end
 
+      b_opts =
+        case opts[:headers] do
+          nil -> @opts
+          headers -> Keyword.update!(@opts, :headers, &(&1 ++ headers))
+        end
+
       Code.compiler_options(ignore_module_conflict: true)
 
       Code.compile_quoted(
         quote do
           defmodule unquote(module) do
+            @moduledoc false
+
             @doc false
             @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
             def do_dispatch(command) do
               with {:ok, cmd} <- Encoder.pack(command),
-                   {:ok, %{body: result}} <- HTTPX.post(unquote(opts[:url]), cmd, unquote(@opts)) do
+                   {:ok, %{body: result}} <- HTTPX.post(unquote(opts[:url]), cmd, unquote(b_opts)) do
                 {:ok, %{command | __meta__: Meta.decode(result, command.__meta__)}}
               end
             end
