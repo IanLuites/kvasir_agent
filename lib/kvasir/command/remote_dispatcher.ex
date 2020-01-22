@@ -62,14 +62,6 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
       def do_dispatch(command), do: __MODULE__.Dispatcher.do_dispatch(command)
-
-      ### Self Configuration On Load ###
-
-      @on_load :__setup__
-
-      @doc false
-      @spec __setup__ :: :ok
-      def __setup__, do: configure()
     end
   end
 
