@@ -113,8 +113,12 @@ defmodule Kvasir.Command.RemoteDispatcher do
             @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
             def do_dispatch(command) do
               with {:ok, cmd} <- Encoder.pack(command),
-                   {:ok, %{body: result}} <- HTTPX.post(unquote(url), cmd, unquote(b_opts)) do
-                {:ok, %{command | __meta__: Meta.decode(result, command.__meta__)}}
+                   {:ok, %{status: s, body: b}} <- HTTPX.post(unquote(url), cmd, unquote(b_opts)) do
+                if s in 200..299 do
+                  {:ok, %{command | __meta__: Meta.decode(b, command.__meta__)}}
+                else
+                  {:error, b["error"] || :dispatch_failed}
+                end
               end
             end
           end
