@@ -76,14 +76,34 @@ defmodule Kvasir.Command.RemoteDispatcher do
   @doc false
   @spec dispatcher(module, Keyword.t()) :: :ok
   def dispatcher(module, opts) do
+    backend =
+      case opts[:mode] do
+        :test -> test_backend(opts)
+        :placeholder -> placeholder_backend(opts)
+        _ -> http_backend(opts)
+      end
+
+    Code.compiler_options(ignore_module_conflict: true)
+
+    Code.compile_quoted(
+      quote do
+        defmodule unquote(module) do
+          @moduledoc false
+          unquote(backend)
+        end
+      end
+    )
+
+    Code.compiler_options(ignore_module_conflict: false)
+
+    :ok
+  end
+
+  @doc false
+  @spec http_backend(Keyword.t()) :: term
+  def http_backend(opts) do
     if Code.ensure_loaded?(HTTPX) do
       Application.ensure_all_started(:httpx)
-
-      _backend =
-        case opts[:mode] do
-          :test -> :test
-          _ -> :http
-        end
 
       b_opts =
         case opts[:headers] do
@@ -93,32 +113,154 @@ defmodule Kvasir.Command.RemoteDispatcher do
 
       url = opts[:url] || ""
 
-      Code.compiler_options(ignore_module_conflict: true)
+      errors =
+        case opts[:atomize_errors] do
+          true ->
+            quote do
+              unquote(__MODULE__).atom_error(b)
+            end
 
-      Code.compile_quoted(
-        quote do
-          defmodule unquote(module) do
-            @moduledoc false
+          :safe ->
+            quote do
+              unquote(__MODULE__).atom_error!(b)
+            end
 
-            @doc false
-            @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
-            def do_dispatch(command) do
-              with {:ok, cmd} <- Encoder.pack(command),
-                   {:ok, %{status: s, body: b}} <- HTTPX.post(unquote(url), cmd, unquote(b_opts)) do
-                if s in 200..299 do
-                  {:ok, %{command | __meta__: Meta.decode(b, command.__meta__)}}
-                else
-                  {:error, b["error"] || :dispatch_failed}
-                end
-              end
+          _ ->
+            quote do
+              unquote(__MODULE__).error(b)
+            end
+        end
+
+      quote do
+        @doc false
+        @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+        def do_dispatch(command) do
+          with {:ok, cmd} <- Encoder.pack(command),
+               {:ok, %{status: s, body: b}} <- HTTPX.post(unquote(url), cmd, unquote(b_opts)) do
+            if s in 200..299 do
+              {:ok, %{command | __meta__: Meta.decode(b, command.__meta__)}}
+            else
+              unquote(errors)
             end
           end
         end
-      )
-
-      Code.compiler_options(ignore_module_conflict: false)
+      end
+    else
+      placeholder_backend(opts)
     end
-
-    :ok
   end
+
+  @doc false
+  @spec placeholder_backend(Keyword.t()) :: term
+  def placeholder_backend(_opts) do
+    quote do
+      @doc false
+      @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+      def do_dispatch(command), do: {:ok, unquote(__MODULE__).set_relevant_timestamps(command)}
+    end
+  end
+
+  @doc false
+  @spec test_backend(Keyword.t()) :: term
+  def test_backend(_opts) do
+    quote do
+      @doc false
+      @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+      def do_dispatch(command) do
+        cmd = unquote(__MODULE__).set_relevant_timestamps(command)
+
+        if call = unquote(__MODULE__).command_callback(__MODULE__) do
+          call.(cmd)
+        else
+          unquote(__MODULE__).command_add(__MODULE__, cmd)
+          {:ok, cmd}
+        end
+      end
+    end
+  end
+
+  def command_callback(backend), do: Agent.get(command_agent(backend), & &1.hook)
+
+  def command_hook(backend, fun), do: Agent.update(command_agent(backend), &%{&1 | hook: fun})
+
+  def command_unhook(backend), do: Agent.update(command_agent(backend), &%{&1 | hook: nil})
+
+  def command_add(backend, command) do
+    id =
+      case command.__meta__.scope do
+        {:instance, i} -> i
+        _ -> nil
+      end
+
+    Agent.update(command_agent(backend), fn state ->
+      %{state | commands: Map.update(state.commands, id, [command], &[command | &1])}
+    end)
+  end
+
+  def command_get(backend, id) do
+    backend
+    |> command_agent()
+    |> Agent.get(&Map.get(&1.commands, id, []))
+    |> :lists.reverse()
+  end
+
+  def command_clear(backend), do: Agent.update(command_agent(backend), &%{&1 | commands: %{}})
+
+  def command_clear(backend, id) do
+    Agent.update(command_agent(backend), &%{&1 | commands: Map.delete(&1.commands, id)})
+  end
+
+  def command_agent(backend) do
+    if p = Process.whereis(backend) do
+      p
+    else
+      {:ok, p} = Agent.start(fn -> %{hook: nil, commands: %{}} end, name: backend)
+      p
+    end
+  end
+
+  @doc false
+  @spec set_relevant_timestamps(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+  def set_relevant_timestamps(command = %{__meta__: meta}) do
+    meta = %{meta | dispatched: UTCDateTime.utc_now()}
+
+    if meta.wait == :dispatch do
+      %{command | __meta__: meta}
+    else
+      meta = %{meta | executed: UTCDateTime.utc_now()}
+
+      if meta.wait == :execute do
+        %{command | __meta__: meta}
+      else
+        %{command | __meta__: %{meta | applied: UTCDateTime.utc_now()}}
+      end
+    end
+  end
+
+  @doc false
+  @spec error(term) :: {:error, term}
+  def error(%{"error" => err}) when err != nil, do: {:error, err}
+  def error(_), do: {:error, :dispatch_failed}
+
+  @doc false
+  @spec atom_error(term) :: {:error, term}
+  def atom_error(%{"error" => err}) when is_binary(err) do
+    {:error, String.to_atom(err)}
+  rescue
+    ArgumentError -> {:error, err}
+  end
+
+  def atom_error(%{"error" => err}) when err != nil, do: {:error, err}
+  def atom_error(_), do: {:error, :dispatch_failed}
+
+  @doc false
+  @spec atom_error!(term) :: {:error, term}
+  def atom_error!(%{"error" => err}) when is_binary(err) do
+    {:error, String.to_existing_atom(err)}
+  rescue
+    ArgumentError -> {:error, err}
+  end
+
+  def atom_error!(%{"error" => err}) when err != nil, do: {:error, err}
+  def atom_error!(_), do: {:error, :dispatch_failed}
 end
