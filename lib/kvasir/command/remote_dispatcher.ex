@@ -86,7 +86,6 @@ defmodule Kvasir.Command.RemoteDispatcher do
   def dispatcher(module, opts) do
     if Code.ensure_loaded?(HTTPX) do
       Application.ensure_all_started(:httpx)
-      Kvasir.Command.RegistryGenerator.create()
 
       _backend =
         case opts[:mode] do
