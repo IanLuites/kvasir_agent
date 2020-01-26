@@ -43,6 +43,29 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @behaviour Kvasir.Command.Dispatcher
 
       @doc ~S"""
+      Dispatch a command to commander, raises on failure.
+
+      ## Examples
+
+      ```elixir
+      iex> dispatch!(<cmd>, instance: <id>)
+      <cmd>
+      ```
+      """
+      @spec dispatch!(Kvasir.Command.t(), Keyword.t()) :: Kvasir.Command.t() | no_return
+      def dispatch!(command, opts \\ []) do
+        case dispatch(command, opts) do
+          {:ok, cmd} ->
+            cmd
+
+          {:error, err} ->
+            raise "#{inspect(__MODULE__)}: Failed to #{opts[:wait] || :dispatch} command. (#{
+                    inspect(err)
+                  })"
+        end
+      end
+
+      @doc ~S"""
       Dispatch a command to commander.
 
       ## Examples
@@ -61,8 +84,148 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @doc false
       @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
-      def do_dispatch(command), do: __MODULE__.Dispatcher.do_dispatch(command)
+      def do_dispatch(command) do
+        if multi = multi_context() do
+          Process.put(__MODULE__, unquote(__MODULE__.Multi).add(multi, command))
+          {:ok, command}
+        else
+          __MODULE__.Dispatcher.do_dispatch(command)
+        end
+      end
+
+      ### Multi ###
+
+      defmodule Multi do
+        @moduledoc ~S"""
+        Dispatch multiple commands concurrently.
+
+        Support smart retry for failed dispatches.
+        """
+        alias Kvasir.Command.RemoteDispatcher.Multi, as: M
+
+        @doc ~S"""
+        Create a new multi-dispatch for dispatching.
+
+        ## Examples
+
+        ```elixir
+        iex> new()
+        #Multi<0>
+        ```
+        """
+        @spec new :: Kvasir.Command.RemoteDispatcher.Multi.t()
+        defdelegate new, to: M
+
+        @doc ~S"""
+        Execute a multi-dispatch; dispatching all added commands.
+
+        ## Examples
+
+        ```elixir
+        iex> exec(#Multi<5>, retry: true)
+        {:ok, #MultiResult<Success>}
+        ```
+        """
+        @spec exec(Kvasir.Command.RemoteDispatcher.Multi.t(), Keyword.t()) ::
+                {:ok | :error, Kvasir.Command.RemoteDispatcher.Multi.Result.t()}
+        def exec(multi, opts \\ []) do
+          r =
+            case opts[:retry] do
+              true ->
+                {250, 5}
+
+              o when is_list(o) ->
+                {Keyword.get(o, :timeout, 250), Keyword.get(o, :attempts, 5),
+                 Keyword.get(o, :only, fn _ -> true end)}
+
+              _ ->
+                false
+            end
+
+          M.exec(multi, &unquote(__CALLER__.module).do_dispatch/1, r)
+        end
+
+        @doc ~S"""
+        Add a command for dispatching to the multi-dispatch.
+
+        ## Examples
+
+        ```elixir
+        iex> dispatch(#Multi<0>, <cmd>, instance: <id>)
+        #Multi<1>
+        ```
+        """
+        @spec dispatch(Kvasir.Command.RemoteDispatcher.Multi.t(), Kvasir.Command.t(), Keyword.t()) ::
+                Kvasir.Command.RemoteDispatcher.Multi.t()
+        def dispatch(multi, command, opts \\ []) do
+          unquote(__MODULE__.Multi).add(
+            multi,
+            Kvasir.Command.Dispatcher.dispatch(unquote(__MODULE__).Pass, command, opts)
+          )
+        end
+      end
+
+      @doc """
+      Dispatch multiple commands as a single retry-able multi-dispatch.
+
+      The `callback` can be any function dispatching commands
+      using `#{inspect(__MODULE__)}.dispatch/2`.
+
+      ## Examples
+
+      ```elixir
+      iex> multi(fn ->
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...> end)
+      {:ok, #MultiResult<Success>}
+      ```
+      """
+      @spec multi(fun, Keyword.t()) ::
+              {:ok | :error, Kvasir.Command.RemoteDispatcher.Multi.Result.t()}
+      def multi(callback, opts \\ []) when is_function(callback, 0) do
+        Process.put(__MODULE__, Multi.new())
+        callback.()
+        Multi.exec(Process.delete(__MODULE__), opts)
+      end
+
+      @doc """
+      Dispatch multiple commands as a single retry-able multi-dispatch.
+
+      The `callback` can be any function dispatching commands
+      using `#{inspect(__MODULE__)}.dispatch/2`.
+
+      See: `#{inspect(__MODULE__)}.multi/2`.
+
+      ## Examples
+
+      ```elixir
+      iex> multi!(fn ->
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...>   dispatch(<cmd>, instance: <id>)
+      ...> end)
+      #MultiResult<Success>
+      ```
+      """
+      @spec multi!(fun, Keyword.t()) :: Kvasir.Command.RemoteDispatcher.Multi.Result.t()
+      def multi!(callback, opts \\ []) when is_function(callback, 0) do
+        {_, m} = multi(callback, opts)
+        m
+      end
+
+      @spec multi_context :: Kvasir.Command.RemoteDispatcher.Multi.t() | nil
+      defp multi_context, do: Process.get(__MODULE__)
     end
+  end
+
+  defmodule Pass do
+    @moduledoc false
+
+    @doc false
+    @spec do_dispatch(term) :: term
+    def do_dispatch(cmd), do: cmd
   end
 
   alias Kvasir.Command.{Encoder, Meta}
@@ -214,8 +377,10 @@ defmodule Kvasir.Command.RemoteDispatcher do
     if p = Process.whereis(backend) do
       p
     else
-      {:ok, p} = Agent.start(fn -> %{hook: nil, commands: %{}} end, name: backend)
-      p
+      case Agent.start(fn -> %{hook: nil, commands: %{}} end, name: backend) do
+        {:ok, p} -> p
+        {:error, {:already_started, p}} -> p
+      end
     end
   end
 
