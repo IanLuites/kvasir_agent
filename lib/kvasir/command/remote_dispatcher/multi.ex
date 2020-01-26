@@ -54,13 +54,13 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
         do_exec(commands, dispatch, only)
       else
         {s, f} = do_exec(commands, dispatch)
-        {s, f, []}
+        {s, f, %{}}
       end
 
     done = success ++ s
     fail = Map.merge(failed, f)
 
-    if retry == [] do
+    if retry == %{} do
       result = %Result{succeeded: done, failed: fail}
       if f == %{}, do: {:ok, result}, else: {:error, result}
     else
@@ -93,7 +93,7 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
     end)
     |> Enum.reduce({[], %{}, %{}}, fn p, {x, y, z} ->
       receive do
-        {:ok, {a, b, c}} -> {a ++ x, Map.merge(b, y), Map.put(z, p, c)}
+        {:ok, {a, b, c}} -> {a ++ x, Map.merge(b, y), if(c == [], do: z, else: Map.put(z, p, c))}
       end
     end)
   end
