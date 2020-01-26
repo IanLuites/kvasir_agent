@@ -39,21 +39,22 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
 
   defp partition(_), do: 0
 
-  def exec(%__MODULE__{commands: c}, dispatch, false) do
-    {s, f} = do_exec(c, dispatch)
+  def exec(%__MODULE__{commands: c}, dispatch, success?, false) do
+    {s, f} = do_exec(c, dispatch, success?)
     result = %Result{succeeded: s, failed: f}
 
     if f == %{}, do: {:ok, result}, else: {:error, result}
   end
 
-  def exec(%__MODULE__{commands: c}, dispatch, retry), do: exec_retry(c, dispatch, retry, [], %{})
+  def exec(%__MODULE__{commands: c}, dispatch, success?, retry),
+    do: exec_retry(c, dispatch, success?, retry, [], %{})
 
-  defp exec_retry(commands, dispatch, {timeout, attempts, only}, success, failed) do
+  defp exec_retry(commands, dispatch, success?, {timeout, attempts, only}, success, failed) do
     {s, f, retry} =
       if attempts > 1 do
-        do_exec(commands, dispatch, only)
+        do_exec(commands, dispatch, success?, only)
       else
-        {s, f} = do_exec(commands, dispatch)
+        {s, f} = do_exec(commands, dispatch, success?)
         {s, f, %{}}
       end
 
@@ -65,15 +66,17 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
       if f == %{}, do: {:ok, result}, else: {:error, result}
     else
       :timer.sleep(timeout)
-      exec_retry(retry, dispatch, {timeout * 2, attempts - 1, only}, done, fail)
+      exec_retry(retry, dispatch, success?, {timeout * 2, attempts - 1, only}, done, fail)
     end
   end
 
-  defp do_exec(commands, dispatch) do
+  defp do_exec(commands, dispatch, success?) do
     me = self()
 
     commands
-    |> Enum.map(fn p -> spawn_link(fn -> send(me, {:ok, exec_partition(p, dispatch)}) end) end)
+    |> Enum.map(fn p ->
+      spawn_link(fn -> send(me, {:ok, exec_partition(p, dispatch, success?)}) end)
+    end)
     |> Enum.reduce({[], %{}}, fn _, {x, y} ->
       receive do
         {:ok, {a, b}} -> {a ++ x, Map.merge(b, y)}
@@ -81,13 +84,13 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
     end)
   end
 
-  defp do_exec(commands, dispatch, retry) do
+  defp do_exec(commands, dispatch, success?, retry) do
     me = self()
 
     commands
     |> Enum.map(fn p ->
       spawn_link(fn ->
-        send(me, {:ok, exec_partition(p, dispatch, retry)})
+        send(me, {:ok, exec_partition(p, dispatch, success?, retry)})
         p
       end)
     end)
@@ -98,25 +101,35 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
     end)
   end
 
-  defp exec_partition({_partition, commands}, dispatch) do
+  defp exec_partition({_partition, commands}, dispatch, success?) do
     Enum.reduce(commands, {[], %{}}, fn command, {success, failure} ->
       case dispatch.(command) do
-        {:ok, c} -> {[c | success], failure}
-        err -> {success, Map.put(failure, command, err)}
+        {:ok, c} ->
+          {[c | success], failure}
+
+        err = {:error, reason} ->
+          if success?.(reason),
+            do: {[command | success], failure},
+            else: {success, Map.put(failure, command, err)}
+
+        err ->
+          {success, Map.put(failure, command, err)}
       end
     end)
   end
 
-  defp exec_partition({_partition, commands}, dispatch, retry?) do
+  defp exec_partition({_partition, commands}, dispatch, success?, retry?) do
     Enum.reduce(commands, {[], %{}, []}, fn command, {success, failure, retry} ->
       case dispatch.(command) do
         {:ok, c} ->
           {[c | success], failure, retry}
 
         err = {:error, reason} ->
-          if retry?.(reason),
-            do: {success, failure, [command | retry]},
-            else: {success, Map.put(failure, command, err), retry}
+          cond do
+            success?.(reason) -> {[command | success], failure, retry}
+            retry?.(reason) -> {success, failure, [command | retry]}
+            :error -> {success, Map.put(failure, command, err), retry}
+          end
 
         err ->
           {success, Map.put(failure, command, err), retry}

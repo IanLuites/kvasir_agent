@@ -132,7 +132,7 @@ defmodule Kvasir.Command.RemoteDispatcher do
           r =
             case opts[:retry] do
               true ->
-                {250, 5}
+                {250, 5, fn _ -> true end}
 
               o when is_list(o) ->
                 {Keyword.get(o, :timeout, 250), Keyword.get(o, :attempts, 5),
@@ -142,7 +142,12 @@ defmodule Kvasir.Command.RemoteDispatcher do
                 false
             end
 
-          M.exec(multi, &unquote(__CALLER__.module).do_dispatch/1, r)
+          M.exec(
+            multi,
+            &unquote(__CALLER__.module).do_dispatch/1,
+            opts[:failed_successfully] || fn _ -> false end,
+            r
+          )
         end
 
         @doc ~S"""
