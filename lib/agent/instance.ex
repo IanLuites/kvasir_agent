@@ -29,17 +29,19 @@ defmodule Kvasir.Agent.Instance do
         }
       ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
-    {offset, agent_state} = load_state(source, cache, topic, model, agent, id)
-    cache.save(agent, id, agent_state, offset)
 
-    state =
-      state
-      |> Map.put(:agent_state, agent_state)
-      |> Map.put(:offset, offset)
-      |> Map.put(:callbacks, %{})
+    with {:ok, {offset, agent_state, _}} <- load_state(source, cache, topic, model, agent, id) do
+      cache.save(agent, id, agent_state, offset)
 
-    keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
-    {:ok, Map.put(state, :keep_alive, keep_alive)}
+      state =
+        state
+        |> Map.put(:agent_state, agent_state)
+        |> Map.put(:offset, offset)
+        |> Map.put(:callbacks, %{})
+
+      keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
+      {:ok, Map.put(state, :keep_alive, keep_alive)}
+    end
   end
 
   defp load_state(source, cache, topic, model, agent, id) do
@@ -55,14 +57,28 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp build_state(source, topic, model, id, offset, original_state) do
+    base = {offset || Kvasir.Offset.create(), original_state, false}
+
     topic
     |> source.stream(from: offset, to: :last, key: id)
-    |> Enum.reduce({offset || Kvasir.Offset.create(), original_state}, fn event,
-                                                                          {offset, state} ->
-      with {:ok, updated_state} <- model.apply(state, event) do
-        {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state}
-      end
-    end)
+    |> EnumX.reduce_while(base, &state_reducer(model, &1, &2))
+  end
+
+  defp state_reducer(model, event, {offset, state, true}) do
+    with {:ok, updated_state} <- model.apply(state, event) do
+      {:ok,
+       {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state, true}}
+    end
+  end
+
+  defp state_reducer(model, event, {offset, state, false}) do
+    o = Kvasir.Offset.get(offset, event.__meta__.partition)
+
+    if is_nil(o) or o < event.__meta__.offset do
+      state_reducer(model, event, {offset, state, true})
+    else
+      {:ok, {offset, state, false}}
+    end
   end
 
   @impl GenServer
