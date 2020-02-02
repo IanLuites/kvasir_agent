@@ -200,19 +200,33 @@ defmodule Kvasir.Command do
               end
             end)
 
-          concat([
-            {:doc_color, :doc_nil, [:reset]},
-            "⊰",
-            inspect(data.__struct__),
-            {:doc_color, :doc_nil, [:italic, :yellow]},
-            "<",
-            data.__meta__.id || "NotDispatched",
-            ">",
-            {:doc_color, :doc_nil, :reset},
-            remove(to_doc(a, opts)),
-            {:doc_color, :doc_nil, :reset},
-            "⊱"
-          ])
+          if a == %{} do
+            concat([
+              {:doc_color, :doc_nil, [:reset]},
+              "⊰",
+              inspect(data.__struct__),
+              {:doc_color, :doc_nil, [:italic, :yellow]},
+              "<",
+              data.__meta__.id || "NotDispatched",
+              ">",
+              {:doc_color, :doc_nil, :reset},
+              "⊱"
+            ])
+          else
+            concat([
+              {:doc_color, :doc_nil, [:reset]},
+              "⊰",
+              inspect(data.__struct__),
+              {:doc_color, :doc_nil, [:italic, :yellow]},
+              "<",
+              data.__meta__.id || "NotDispatched",
+              ">",
+              {:doc_color, :doc_nil, :reset},
+              remove(to_doc(a, opts)),
+              {:doc_color, :doc_nil, :reset},
+              "⊱"
+            ])
+          end
         end
 
         defp remove({a, "%{", c}), do: {a, "{", c}
