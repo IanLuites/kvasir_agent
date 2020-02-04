@@ -250,7 +250,7 @@ defmodule Kvasir.Command do
       """
       # @impl Kvasir.Command
       @spec create(term) :: {:ok, struct} | {:error, term}
-      def create(data), do: Kvasir.Command.create(__MODULE__, [data])
+      def create(data \\ []), do: Kvasir.Command.create(__MODULE__, [data])
 
       @doc ~S"""
       Create this command based on the given data.
@@ -265,7 +265,7 @@ defmodule Kvasir.Command do
       """
       # @impl Kvasir.Command
       @spec create!(term) :: struct | no_return
-      def create!(data), do: Kvasir.Command.create!(__MODULE__, [data])
+      def create!(data \\ []), do: Kvasir.Command.create!(__MODULE__, [data])
 
       @doc false
       # @impl Kvasir.Command
