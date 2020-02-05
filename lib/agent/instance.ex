@@ -72,9 +72,8 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp state_reducer(model, event, {offset, state, false}) do
-    o = Kvasir.Offset.get(offset, event.__meta__.partition)
-
-    if is_nil(o) or o < event.__meta__.offset do
+    if Offset.empty?(offset) or
+         Offset.get(offset, event.__meta__.partition) < event.__meta__.offset do
       state_reducer(model, event, {offset, state, true})
     else
       {:ok, {offset, state, false}}
@@ -141,11 +140,11 @@ defmodule Kvasir.Agent.Instance do
   defp apply_events([], state, offset),
     do: {:ok, if(offset, do: notify_offset_callbacks(state, offset), else: state)}
 
-  defp apply_events([event | events], state, c_offset) do
+  defp apply_events([event | events], state = %{offset: o}, c_offset) do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     %{offset: offset, partition: partition} = event.__meta__
 
-    if Offset.get(state.offset, event.__meta__.partition) < offset do
+    if Offset.empty?(o) or Offset.get(o, event.__meta__.partition) < offset do
       case state.model.apply(state.agent_state, event) do
         {:ok, updated_state} ->
           updated_offset = Offset.set(state.offset, partition, offset)
