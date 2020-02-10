@@ -184,8 +184,9 @@ defmodule Kvasir.Agent.Instance do
     |> EnumX.map(&source.publish(topic, &1))
   end
 
-  defp prepare_event(event, ref, %{id: id, partition: partition}) do
-    meta = %{event.__meta__ | command: ref, partition: partition, key: id}
+  defp prepare_event(event, _ref, %{id: id, partition: partition}) do
+    # meta = %{event.__meta__ | command: ref, partition: partition, key: id}
+    meta = %{event.__meta__ | partition: partition, key: id}
     %{event | __meta__: meta}
   end
 
