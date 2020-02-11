@@ -24,6 +24,14 @@ defmodule Kvasir.Agent.Cache.ETS do
     end
   end
 
+  @impl Kvasir.Agent.Cache
+  def delete(module, id) do
+    ensure_storage_table_created()
+    :ets.delete(@storage_table, {module, id})
+
+    :ok
+  end
+
   @spec ensure_storage_table_created :: module
   defp ensure_storage_table_created do
     case :ets.info(@storage_table) do
