@@ -17,7 +17,12 @@ defmodule Kvasir.Agent.Supervisor do
     |> Enum.map(&(&1 |> elem(0) |> elem(1)))
   end
 
-  def whereis(%{agent: agent}, id), do: agent |> registry() |> Registry.lookup({agent, id})
+  def whereis(%{agent: agent}, id) do
+    case agent |> registry() |> Registry.lookup({agent, id}) do
+      [{pid, _}] -> pid
+      _ -> nil
+    end
+  end
 
   def alive?(config, id), do: whereis(config, id) != nil
 
