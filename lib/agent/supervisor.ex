@@ -8,17 +8,16 @@ defmodule Kvasir.Agent.Supervisor do
 
   def open(config = %{registry: registry}, id), do: registry.start_child(config, id)
 
-  def count(%{registry: registry}), do: Registry.count(registry)
+  def count(%{agent: agent}), do: agent |> registry() |> Registry.count()
 
-  def list(%{registry: registry}) do
-    registry
+  def list(%{agent: agent}) do
+    agent
+    |> registry()
     |> Registry.select([{{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
     |> Enum.map(&(&1 |> elem(0) |> elem(1)))
   end
 
-  def whereis(%{agent: agent, registry: registry}, id) do
-    Registry.lookup(registry, {agent, id})
-  end
+  def whereis(%{agent: agent}, id), do: agent |> registry() |> Registry.lookup({agent, id})
 
   def alive?(config, id), do: whereis(config, id) != nil
 
