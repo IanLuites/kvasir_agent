@@ -63,6 +63,58 @@ defmodule Kvasir.Agent do
         def inspect(id), do: Manager.inspect(__agent__(:config), id)
 
         @doc ~S"""
+        The current amount of active agent instances.
+
+        ## Examples
+
+        ```elixir
+        iex> count()
+        4
+        ```
+        """
+        @spec count :: non_neg_integer
+        def count, do: Supervisor.count(__agent__(:config))
+
+        @doc ~S"""
+        List the IDs of the currently active agent instances.
+
+        ## Examples
+
+        ```elixir
+        iex> list()
+        [<id>, <id>]
+        ```
+        """
+        @spec list :: [term]
+        def list, do: Supervisor.list(__agent__(:config))
+
+        @doc ~S"""
+        Get the agent instance process pid.
+
+        ## Examples
+
+        ```elixir
+        iex> whereis(<id>)
+        <pid>
+        ```
+        """
+        @spec whereis(any) :: pid | nil
+        def whereis(id), do: Supervisor.whereis(__agent__(:config), id)
+
+        @doc ~S"""
+        Checks whether a given agent instance is currently active.
+
+        ## Examples
+
+        ```elixir
+        iex> alive?(<id>)
+        true
+        ```
+        """
+        @spec alive?(any) :: boolean
+        def alive?(id), do: Supervisor.alive?(__agent__(:config), id)
+
+        @doc ~S"""
         Dynamically configure specific components.
 
         ## Examples
