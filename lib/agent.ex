@@ -35,6 +35,22 @@ defmodule Kvasir.Agent do
         def do_dispatch(command), do: Manager.dispatch(__MODULE__, command)
 
         @doc ~S"""
+        Dispatch a command.
+
+        ```elixir
+        iex> dispatch!(<cmd>, instance: <id>)
+        <cmd>
+        ```
+        """
+        @spec dispatch!(Kvasir.Command.t(), Keyword.t()) :: Kvasir.Command.t() | no_return
+        def dispatch!(command, opts \\ []) do
+          case dispatch(command, opts) do
+            {:ok, cmd} -> cmd
+            {:error, err} -> raise "Command dispatch failed: #{inspect(err)}."
+          end
+        end
+
+        @doc ~S"""
         Start and return the pid of an agent instance.
 
         ## Examples
