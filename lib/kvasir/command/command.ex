@@ -58,8 +58,64 @@ defmodule Kvasir.Command do
         e = Macro.expand(e, caller)
         fields = e.__event__(:fields)
 
+        base =
+          quote do
+            @doc ~S"""
+            Create an event based on the given command.
+
+            Optionally allows for passing a keyword list to override
+            or set values.
+
+            ## Examples
+
+            ```elixir
+            iex> to_event(<cmd>)
+            {:ok, <event>}
+            ```
+            """
+            @spec to_event(Kvasir.Command.t(), Keyword.t()) ::
+                    {:ok, Kvasir.Event.t()} | {:error, atom}
+            def to_event(command, override \\ []) do
+              unquote(Enum.map(fields, &elem(&1, 0)))
+              |> Enum.reduce([], fn f, a ->
+                case Map.fetch(command, f) do
+                  {:ok, v} when v != nil -> [{f, v} | a]
+                  _ -> a
+                end
+              end)
+              |> Keyword.merge(override)
+              |> unquote(e).create()
+            end
+
+            @doc ~S"""
+            Create an event based on the given command.
+
+            Optionally allows for passing a keyword list to override
+            or set values.
+
+            ## Examples
+
+            ```elixir
+            iex> to_event!(<cmd>)
+            <event>
+            ```
+            """
+            @spec to_event!(Kvasir.Command.t(), Keyword.t()) :: Kvasir.Event.t() | no_return
+            def to_event!(command, override \\ []) do
+              unquote(Enum.map(fields, &elem(&1, 0)))
+              |> Enum.reduce([], fn f, a ->
+                case Map.fetch(command, f) do
+                  {:ok, v} when v != nil -> [{f, v} | a]
+                  _ -> a
+                end
+              end)
+              |> Keyword.merge(override)
+              |> unquote(e).create!()
+            end
+          end
+
         {[e | emits],
-         Enum.reduce(fields, nil, fn {n, t, o}, acc ->
+         Enum.reduce(fields, base, fn {n, t, o}, acc ->
            quote do
              unquote(acc)
              field unquote(n), unquote(t), unquote(Macro.escape(o))
