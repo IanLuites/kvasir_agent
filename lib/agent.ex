@@ -35,7 +35,9 @@ defmodule Kvasir.Agent do
         def do_dispatch(command), do: Manager.dispatch(__MODULE__, command)
 
         @doc ~S"""
-        Dispatch a command.
+        Dispatch a command, raises on failure.
+
+        ## Examples
 
         ```elixir
         iex> dispatch!(<cmd>, instance: <id>)
