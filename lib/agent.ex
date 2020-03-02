@@ -133,6 +133,31 @@ defmodule Kvasir.Agent do
         def alive?(id), do: Supervisor.alive?(__agent__(:config), id)
 
         @doc ~S"""
+        Forces an agent instance to sleep.
+
+        (Shuts down the process.)
+
+        ## Examples
+
+        ```elixir
+        iex> sleep(<id>)
+        :ok
+        ```
+
+        Optionally allows to pass a reason for sleep:
+        ```elixir
+        iex> sleep(<id>, :testing)
+        :ok
+        ```
+        """
+        @spec sleep(id :: any, reason :: atom) :: :ok
+        def sleep(id, reason \\ :sleep) do
+          if pid = whereis(id), do: send(pid, {:shutdown, reason})
+
+          :ok
+        end
+
+        @doc ~S"""
         Dynamically configure specific components.
 
         ## Examples
