@@ -425,9 +425,17 @@ defmodule Kvasir.Command do
   def is_command?(command) when is_atom(command), do: true
   def is_command?(_), do: false
 
+  def instance(command) do
+    case command.__meta__.scope do
+      {:instance, i} -> i
+      _ -> nil
+    end
+  end
+
   def set_executed(command), do: update_meta(command, :executed, utc_now())
   def set_applied(command), do: update_meta(command, :applied, utc_now())
   def set_offset(command, offset), do: update_meta(command, :offset, offset)
+  def set_instance(command, instance), do: update_meta(command, :scope, {:instance, instance})
 
   defp update_meta(command = %{__meta__: meta}, field, value),
     do: %{command | __meta__: Map.put(meta, field, value)}
