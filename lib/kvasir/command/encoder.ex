@@ -46,7 +46,7 @@ defmodule Kvasir.Command.Encoder do
   ## Decoding  ##
 
   defp find_command(command) when is_atom(command) do
-    if Code.ensure_compiled?(command),
+    if CodeX.ensure_compiled?(command),
       do: {:ok, command},
       else: {:error, :unknown_command}
   end

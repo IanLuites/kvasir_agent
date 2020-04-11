@@ -270,7 +270,7 @@ defmodule Kvasir.Command.RemoteDispatcher do
   @doc false
   @spec http_backend(Keyword.t()) :: term
   def http_backend(opts) do
-    if Code.ensure_loaded?(HTTPX) do
+    if CodeX.ensure_loaded?(HTTPX) do
       Application.ensure_all_started(:httpx)
 
       b_opts =
