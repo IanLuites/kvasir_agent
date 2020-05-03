@@ -163,7 +163,7 @@ defmodule Kvasir.Agent.Instance do
 
   defp apply_events(events, state, counter, offset \\ nil)
 
-  defp apply_events([], state, counter, offset),
+  defp apply_events([], state, _counter, offset),
     do: {:ok, if(offset, do: notify_offset_callbacks(state, offset), else: state)}
 
   defp apply_events([event | events], state = %{offset: o}, counter, c_offset) do

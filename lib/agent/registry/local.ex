@@ -22,7 +22,4 @@ defmodule Kvasir.Agent.Registry.Local do
       pid
     end
   end
-
-  def list(agent, partition) do
-  end
 end

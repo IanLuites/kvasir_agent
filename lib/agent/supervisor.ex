@@ -38,8 +38,8 @@ defmodule Kvasir.Agent.Supervisor do
   def alive?(config, partition, id), do: whereis(config, partition, id) != nil
 
   # @spec init(module, module) ::
-  def init(config = %{agent: agent}) do
-    partitions = config.source.__topics__()[config.topic].partitions
+  def init(config = %{source: source}) do
+    partitions = source.__topics__()[config.topic].partitions
 
     children =
       Enum.map(0..(partitions - 1), fn p ->
