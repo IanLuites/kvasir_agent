@@ -1,47 +1,54 @@
 defmodule Kvasir.Agent.Supervisor do
   use Supervisor
-  import Kvasir.Agent.Helpers
+  alias Kvasir.Agent.PartitionSupervisor
 
   def start_link(config = %{agent: agent}) do
-    Supervisor.start_link(__MODULE__, config, name: supervisor(agent))
+    Supervisor.start_link(__MODULE__, config, name: :"#{agent}.Supervisor")
   end
 
-  def open(config = %{registry: registry}, id), do: registry.start_child(config, id)
-
-  def count(%{agent: agent}), do: agent |> registry() |> Registry.count()
-
-  def list(%{agent: agent}) do
-    agent
-    |> registry()
-    |> Registry.select([{{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
-    |> Enum.map(&(&1 |> elem(0) |> elem(1)))
+  def open(registry, agent, partition, id) do
+    registry.start_child(agent, partition, id)
   end
 
-  def whereis(%{agent: agent}, id) do
-    case agent |> registry() |> Registry.lookup({agent, id}) do
+  def count(agent, partitions) do
+    0..(partitions - 1)
+    |> Enum.map(&PartitionSupervisor.count(agent, &1))
+    |> Enum.sum()
+  end
+
+  def list(agent, partitions) do
+    Enum.flat_map(
+      0..(partitions - 1),
+      fn p ->
+        p
+        |> agent.__registry__()
+        |> Registry.select([{{:"$1", :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}])
+        |> Enum.map(&(&1 |> elem(0)))
+      end
+    )
+  end
+
+  def whereis(agent, partition, id) do
+    case partition |> agent.__registry__() |> Registry.lookup(id) do
       [{pid, _}] -> pid
       _ -> nil
     end
   end
 
-  def alive?(config, id), do: whereis(config, id) != nil
+  def alive?(config, partition, id), do: whereis(config, partition, id) != nil
 
   # @spec init(module, module) ::
-  def init(config = %{agent: agent, cache: {cache, cache_opts}}) do
-    children = [
-      %{
-        id: :manager,
-        start: {Kvasir.Agent.Manager, :start_link, [config]}
-      },
-      %{
-        id: :registry,
-        start: {Registry, :start_link, [[keys: :unique, name: registry(agent)]]}
-      }
-    ]
+  def init(config = %{agent: agent}) do
+    partitions = config.source.__topics__()[config.topic].partitions
 
-    case cache.init(agent, agent.config(:cache, cache_opts)) do
-      :ok -> Supervisor.init(children, strategy: :one_for_one)
-      {:ok, child} -> Supervisor.init([child | children], strategy: :one_for_one)
-    end
+    children =
+      Enum.map(0..(partitions - 1), fn p ->
+        %{
+          id: :"supervisor#{p}",
+          start: {PartitionSupervisor, :start_link, [config, p]}
+        }
+      end)
+
+    Supervisor.init(children, strategy: :one_for_one)
   end
 end

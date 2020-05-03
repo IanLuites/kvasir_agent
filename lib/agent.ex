@@ -4,11 +4,14 @@ defmodule Kvasir.Agent do
   """
 
   defmacro __using__(opts \\ []) do
-    source = opts[:source] || raise "Need to pass the Kvasir EventSource."
-    topic = opts[:topic] || raise "Need to pass the Kafka topic."
+    source =
+      Macro.expand(opts[:source], __CALLER__) || raise "Need to pass the Kvasir EventSource."
+
+    topic = Macro.expand(opts[:topic], __CALLER__) || raise "Need to pass the Kafka topic."
     model = opts[:model] || raise "Need to pass a Kvasir model."
     {cache, cache_opts} = Macro.expand(Kvasir.Agent.Config.cache!(opts), __CALLER__)
     registry = Kvasir.Agent.Config.registry!(opts)
+    partitions = source.__topics__()[topic].partitions
 
     # Disabled environments
     unless Mix.env() in (opts[:disable] || []) do
@@ -16,6 +19,7 @@ defmodule Kvasir.Agent do
         use Kvasir.Command.Dispatcher
         alias Kvasir.Agent
         alias Kvasir.Agent.{Manager, Supervisor}
+        @compile {:inline, __agent__: 1}
         require unquote(source)
 
         @source unquote(source)
@@ -24,6 +28,7 @@ defmodule Kvasir.Agent do
         @registry unquote(registry)
         @model unquote(model)
         @key @source.__topics__()[@topic].key
+        @partitions unquote(partitions)
 
         @doc false
         @spec child_spec(Keyword.t()) :: map
@@ -32,7 +37,9 @@ defmodule Kvasir.Agent do
         @doc false
         @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
         @impl Kvasir.Command.Dispatcher
-        def do_dispatch(command), do: Manager.dispatch(__MODULE__, command)
+        def do_dispatch(command) do
+          Manager.dispatch(__MODULE__, @registry, command)
+        end
 
         @doc ~S"""
         Dispatch a command, raises on failure.
@@ -63,7 +70,8 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec open(any) :: {:ok, pid} | {:error, atom}
-        def open(id), do: Supervisor.open(__agent__(:config), id)
+        def open(id),
+          do: Supervisor.open(unquote(registry), __MODULE__, @key.partition!(id, @partitions), id)
 
         @doc ~S"""
         Inspect the current state of an agent instance.
@@ -78,7 +86,8 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec inspect(any) :: {:ok, term} | {:error, atom}
-        def inspect(id), do: Manager.inspect(__agent__(:config), id)
+        def inspect(id),
+          do: Manager.inspect(unquote(registry), __MODULE__, @key.partition!(id, @partitions), id)
 
         @doc ~S"""
         The current amount of active agent instances.
@@ -91,7 +100,7 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec count :: non_neg_integer
-        def count, do: Supervisor.count(__agent__(:config))
+        def count, do: Supervisor.count(__MODULE__, @partitions)
 
         @doc ~S"""
         List the IDs of the currently active agent instances.
@@ -104,7 +113,7 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec list :: [term]
-        def list, do: Supervisor.list(__agent__(:config))
+        def list, do: Supervisor.list(__MODULE__, @partitions)
 
         @doc ~S"""
         Get the agent instance process pid.
@@ -117,7 +126,8 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec whereis(any) :: pid | nil
-        def whereis(id), do: Supervisor.whereis(__agent__(:config), id)
+        def whereis(id),
+          do: Supervisor.whereis(__MODULE__, @key.partition!(id, @partitions), id)
 
         @doc ~S"""
         Checks whether a given agent instance is currently active.
@@ -130,7 +140,8 @@ defmodule Kvasir.Agent do
         ```
         """
         @spec alive?(any) :: boolean
-        def alive?(id), do: Supervisor.alive?(__agent__(:config), id)
+        def alive?(id),
+          do: Supervisor.alive?(__MODULE__, @key.partition!(id, @partitions), id)
 
         @doc ~S"""
         Forces an agent instance to sleep.
@@ -187,6 +198,47 @@ defmodule Kvasir.Agent do
 
         def __agent__(:topic), do: @topic
         def __agent__(:key), do: @key
+
+        @doc false
+        @spec __supervisor__(non_neg_integer) :: module
+        unquote(
+          Enum.reduce(0..(partitions - 1), nil, fn i, acc ->
+            quote do
+              unquote(acc)
+              def __supervisor__(unquote(i)), do: unquote(:"#{__CALLER__.module}.Supervisor#{i}")
+            end
+          end)
+        )
+
+        @doc false
+        @spec __registry__(non_neg_integer) :: module
+        unquote(
+          Enum.reduce(0..(partitions - 1), nil, fn i, acc ->
+            quote do
+              unquote(acc)
+              def __registry__(unquote(i)), do: unquote(:"#{__CALLER__.module}.Registry#{i}")
+            end
+          end)
+        )
+
+        @doc false
+        @spec __manager__(non_neg_integer) :: module
+        unquote(
+          Enum.reduce(0..(partitions - 1), nil, fn i, acc ->
+            quote do
+              unquote(acc)
+              def __manager__(unquote(i)), do: unquote(:"#{__CALLER__.module}.Manager#{i}")
+            end
+          end)
+        )
+
+        @doc false
+        @spec __key__(term) :: {:ok, term, non_neg_integer} | {:error, term}
+        def __key__(id) do
+          with {:ok, k} <- @key.parse(id, []),
+               {:ok, p} <- @key.partition(k, @partitions),
+               do: {:ok, k, p}
+        end
       end
     end
   end
