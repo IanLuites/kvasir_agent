@@ -4,14 +4,12 @@ defmodule Kvasir.Agent.Instance do
   alias Kvasir.Offset
   @keep_alive 60_000
 
-  def start_agent(config, id, opts) do
-    t = config.source.__topics__()[config.topic]
-    {:ok, p} = t.key.partition(id, t.partitions)
-
+  def start_agent(agent, partition, id, opts) do
     config =
-      config
+      :config
+      |> agent.__agent__()
       |> Map.put(:id, id)
-      |> Map.put(:partition, p)
+      |> Map.put(:partition, partition)
       |> Map.update!(:cache, &elem(&1, 0))
 
     GenServer.start_link(__MODULE__, config, opts)
@@ -22,6 +20,7 @@ defmodule Kvasir.Agent.Instance do
         state = %{
           source: source,
           agent: agent,
+          partition: partition,
           id: id,
           cache: cache,
           topic: topic,
@@ -30,9 +29,8 @@ defmodule Kvasir.Agent.Instance do
       ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
 
-    with {:ok, {offset, agent_state, _}} <- load_state(source, cache, topic, model, agent, id) do
-      cache.save(agent, id, agent_state, offset)
-
+    with {:ok, {offset, agent_state, _}} <-
+           load_state(source, cache, topic, model, agent, partition, id) do
       state =
         state
         |> Map.put(:agent_state, agent_state)
@@ -44,14 +42,30 @@ defmodule Kvasir.Agent.Instance do
     end
   end
 
-  defp load_state(source, cache, topic, model, agent, id) do
-    case cache.load(agent, id) do
+  defp load_state(source, cache, topic, model, agent, partition, id) do
+    case cache.load(agent, partition, id) do
+      {:ok, offset, nil} ->
+        Logger.debug(fn -> "Agent<#{id}>: State Loaded: No State, Setup New" end)
+        {:ok, {offset, model.base(id), :no_tracking}}
+
       {:ok, offset, state} ->
         Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{inspect(offset)}" end)
-        build_state(source, topic, model, id, offset, state)
+        # build_state(source, topic, model, id, offset, state)
+        {:ok, {offset, state, :no_tracking}}
+
+      {:error, :state_counter_mismatch, correct, loaded} ->
+        Logger.debug(fn ->
+          "Agent<#{id}>: State Load Failed: Command Counter Mismatch #{correct} != #{loaded} (tracked, state)"
+        end)
+
+        with r = {:ok, {offset, agent_state, _}} <-
+               build_state(source, topic, model, id, nil, model.base(id)) do
+          cache.save(agent, partition, id, agent_state, offset, correct)
+          r
+        end
 
       {:error, reason} ->
-        Logger.debug(fn -> "Agent<#{id}>: No State Loaded: #{reason}" end)
+        Logger.debug(fn -> "Agent<#{id}>: State Load Failed: #{reason}" end)
         build_state(source, topic, model, id, nil, model.base(id))
     end
   end
@@ -83,10 +97,18 @@ defmodule Kvasir.Agent.Instance do
   @impl GenServer
   def handle_info(
         {:command, from, command},
-        state = %{agent_state: agent_state, model: model, partition: p}
+        state = %{
+          agent: agent,
+          agent_state: agent_state,
+          cache: cache,
+          id: id,
+          model: model,
+          partition: p
+        }
       ) do
+    {:ok, counter} = cache.track_command(agent, p, id)
     pause_keep_alive(state)
-    Logger.debug(fn -> "Agent<#{state.id}>: Command: #{inspect(command)}" end)
+    Logger.debug(fn -> "Agent<#{state.id}>: Command<#{counter}>: #{inspect(command)}" end)
 
     ref = command.__meta__.id
 
@@ -108,7 +130,9 @@ defmodule Kvasir.Agent.Instance do
     case response do
       {:ok, events} ->
         send(from, {:command, ref, {:ok, Offset.create(p, List.last(events).__meta__.offset)}})
-        with {:ok, state} <- apply_events(events, state), do: {:noreply, reset_keep_alive(state)}
+
+        with {:ok, state} <- apply_events(events, state, counter),
+             do: {:noreply, reset_keep_alive(state)}
 
       _ ->
         send(from, {:command, ref, response})
@@ -116,8 +140,10 @@ defmodule Kvasir.Agent.Instance do
     end
   end
 
-  def handle_info({:event, event}, state) do
-    with {:ok, state} <- apply_events([event], state), do: {:noreply, state}
+  def handle_info({:event, event}, state = %{agent: agent, cache: cache, id: id, partition: p}) do
+    with {:ok, counter} <- cache.command_track(agent, p, id),
+         {:ok, state} <- apply_events([event], state, counter),
+         do: {:noreply, state}
   end
 
   def handle_info({:offset_callback, from, ref, offset}, state) do
@@ -135,12 +161,12 @@ defmodule Kvasir.Agent.Instance do
     {:reply, state.agent_state, state}
   end
 
-  defp apply_events(events, state, offset \\ nil)
+  defp apply_events(events, state, counter, offset \\ nil)
 
-  defp apply_events([], state, offset),
+  defp apply_events([], state, counter, offset),
     do: {:ok, if(offset, do: notify_offset_callbacks(state, offset), else: state)}
 
-  defp apply_events([event | events], state = %{offset: o}, c_offset) do
+  defp apply_events([event | events], state = %{offset: o}, counter, c_offset) do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     %{offset: offset, partition: partition} = event.__meta__
 
@@ -148,7 +174,22 @@ defmodule Kvasir.Agent.Instance do
       case state.model.apply(state.agent_state, event) do
         {:ok, updated_state} ->
           updated_offset = Offset.set(state.offset, partition, offset)
-          state.cache.save(state.agent, state.id, updated_state, updated_offset)
+          # Ian:
+          #  OK, so on new command, generate events, then set a transaction.
+          #  This transaction indicates new events.
+          #  If the state then shows that the transaction is incomplete.
+          #  Only then needs the eventsource be read.
+          if events == [] do
+            state.cache.save(
+              state.agent,
+              partition,
+              state.id,
+              updated_state,
+              updated_offset,
+              counter
+            )
+          end
+
           state = %{state | offset: updated_offset, agent_state: updated_state}
           apply_events(events, state, updated_offset)
 
