@@ -15,7 +15,18 @@ locals_without_parens = [
   entities: 3,
   dispatch: 1,
   state: 1,
-  transition: 2
+  transition: 2,
+  event!: 2,
+  event!: 3,
+  event!: 4,
+  event: 2,
+  event: 3,
+  event: 4,
+  execute: 2,
+  execute: 3,
+  execute: 4,
+  object_value: 1,
+  object_value: 2
 ]
 
 [
