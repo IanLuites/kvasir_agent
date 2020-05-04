@@ -1,6 +1,7 @@
 defmodule Kvasir.Command.Meta do
   @type t :: %__MODULE__{
           id: String.t(),
+          entity: nil | [atom | {atom, term}],
           created: UTCDateTime.t(),
           dispatched: UTCDateTime.t(),
           executed: UTCDateTime.t(),
@@ -14,6 +15,7 @@ defmodule Kvasir.Command.Meta do
 
   defstruct [
     :id,
+    :entity,
     :created,
     :dispatched,
     :executed,
@@ -59,6 +61,7 @@ defmodule Kvasir.Command.Meta do
 
   @spec parse_meta(String.t(), any) :: {atom, any}
   defp parse_meta("id", value), do: {:id, value}
+  defp parse_meta("entity", value), do: {:entity, value}
   defp parse_meta("created", value), do: {:created, UTCDateTime.from_iso8601!(value)}
   defp parse_meta("dispatched", value), do: {:dispatched, UTCDateTime.from_iso8601!(value)}
   defp parse_meta("executed", value), do: {:executed, UTCDateTime.from_iso8601!(value)}
