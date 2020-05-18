@@ -10,6 +10,7 @@ defmodule Kvasir.Agent.Aggregate do
 
   defmacro __using__(opts \\ []) do
     root = opts[:root]
+    key = opts[:key]
 
     quote location: :keep do
       @behaviour Kvasir.Agent.Aggregate
@@ -33,10 +34,12 @@ defmodule Kvasir.Agent.Aggregate do
       @spec __aggregate__(atom) :: term
       def __aggregate__(:config),
         do: %{
-          root: unquote(root)
+          root: unquote(root),
+          key: unquote(key)
         }
 
       def __aggregate__(:root), do: unquote(root)
+      def __aggregate__(:key), do: unquote(key)
     end
   end
 end
