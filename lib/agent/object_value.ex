@@ -2,15 +2,75 @@ defmodule Kvasir.Agent.ObjectValue do
   defmodule Definition do
     import Kvasir.Event, only: [property: 4]
 
-    defmacro property(name, type \\ :string, opts \\ []) do
-      t = Macro.expand(type, __CALLER__)
+    defp force_load!(module) do
+      if not is_atom(module) or match?(":" <> _, inspect(module)) do
+        :ok
+      else
+        force_load_try!(module)
+      end
+    end
 
-      Code.ensure_loaded(t)
+    defp force_load_try!(module, attempt \\ 0)
+    defp force_load_try!(module, 5), do: raise("Can't load: #{module}")
+
+    defp force_load_try!(module, attempt) do
+      Code.ensure_compiled(module)
+
+      if Code.ensure_loaded?(module) do
+        :ok
+      else
+        :timer.sleep(attempt * 100)
+        force_load_try!(module, attempt + 1)
+      end
+    end
+
+    def track_properties(caller, name, type, opts) do
+      t = Macro.expand(type, caller)
+
+      force_load!(t)
 
       if :erlang.function_exported(t, :__object_value__, 1) do
-        Kvasir.Agent.Mutator.add_object_value(__CALLER__, name, t)
+        Kvasir.Agent.Mutator.add_object_value(caller, name, t)
       end
 
+      case Macro.expand(opts[:auto], caller) do
+        {:set, command} ->
+          cmd = Macro.expand(command, caller)
+          Code.ensure_compiled(cmd)
+          Code.ensure_loaded(cmd)
+          Kvasir.Agent.Mutator.add_setter(caller, cmd, name, name)
+
+        {:{}, _, [:set, command, field]} ->
+          cmd = Macro.expand(command, caller)
+          Code.ensure_compiled(cmd)
+          Code.ensure_loaded(cmd)
+          Kvasir.Agent.Mutator.add_setter(caller, cmd, name, field)
+
+        {:{}, _, [:collect, add, remove]} ->
+          add_cmd = Macro.expand(add, caller)
+          Code.ensure_compiled(add_cmd)
+          Code.ensure_loaded(add_cmd)
+          remove_cmd = Macro.expand(remove, caller)
+          Code.ensure_compiled(remove_cmd)
+          Code.ensure_loaded(remove_cmd)
+          Kvasir.Agent.Mutator.add_collector(caller, add_cmd, remove_cmd, name, type, [])
+
+        {:{}, _, [:collect, add, remove, o]} ->
+          add_cmd = Macro.expand(add, caller)
+          Code.ensure_compiled(add_cmd)
+          Code.ensure_loaded(add_cmd)
+          remove_cmd = Macro.expand(remove, caller)
+          Code.ensure_compiled(remove_cmd)
+          Code.ensure_loaded(remove_cmd)
+          Kvasir.Agent.Mutator.add_collector(caller, add_cmd, remove_cmd, name, type, o)
+
+        _ ->
+          :ok
+      end
+    end
+
+    defmacro property(name, type \\ :string, opts \\ []) do
+      track_properties(__CALLER__, name, type, opts)
       property(__CALLER__, name, type, opts)
     end
   end
@@ -82,9 +142,12 @@ defmodule Kvasir.Agent.ObjectValue do
   end
 
   defmacro object_value(type, opts \\ []) do
+    Definition.track_properties(__CALLER__, nil, type, opts)
+    Module.put_attribute(__CALLER__.module, :manual, opts[:manual] || false)
+
     quote do
       @__type__ unquote(type)
-      @__opts__ unquote(opts)
+      @__opts__ unquote(Macro.escape(opts))
       @struct_fields []
 
       require Kvasir.Agent.Mutator
@@ -101,26 +164,34 @@ defmodule Kvasir.Agent.ObjectValue do
 
   defmacro __before_compile__(env) do
     quote do
-      @doc false
-      @spec generate_apply([atom]) :: term
-      def generate_apply(path) do
-        Kvasir.Agent.Mutator.generate_apply(
-          __object_value__(:events),
-          __object_value__(:object_values),
-          [],
-          path
-        )
-      end
+      unless unquote(Module.get_attribute(env.module, :manual)) do
+        @doc false
+        @spec generate_apply([atom]) :: term
+        def generate_apply(path) do
+          Kvasir.Agent.Mutator.generate_apply(
+            nil,
+            __object_value__(:events),
+            __object_value__(:object_values),
+            [],
+            __object_value__(:setters),
+            __object_value__(:collectors),
+            path
+          )
+        end
 
-      @doc false
-      @spec generate_execution([atom]) :: term
-      def generate_execution(path) do
-        Kvasir.Agent.Mutator.generate_execution(
-          __object_value__(:executes),
-          __object_value__(:object_values),
-          [],
-          path
-        )
+        @doc false
+        @spec generate_execution([atom]) :: term
+        def generate_execution(path) do
+          Kvasir.Agent.Mutator.generate_execution(
+            nil,
+            __object_value__(:executes),
+            __object_value__(:object_values),
+            [],
+            __object_value__(:setters),
+            __object_value__(:collectors),
+            path
+          )
+        end
       end
 
       @doc false
@@ -146,6 +217,14 @@ defmodule Kvasir.Agent.ObjectValue do
 
       def __object_value__(:object_values) do
         unquote(Macro.escape(Mutator.object_values(env)))
+      end
+
+      def __object_value__(:setters) do
+        unquote(Macro.escape(Mutator.setters(env)))
+      end
+
+      def __object_value__(:collectors) do
+        unquote(Macro.escape(Mutator.collectors(env)))
       end
     end
   end

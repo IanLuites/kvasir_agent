@@ -1,9 +1,12 @@
 defmodule Kvasir.Agent.Mutator do
   def init(env) do
+    Module.register_attribute(env.module, :creation, accumulate: false)
     Module.register_attribute(env.module, :event, accumulate: true)
     Module.register_attribute(env.module, :execute, accumulate: true)
     Module.register_attribute(env.module, :object_values, accumulate: true)
     Module.register_attribute(env.module, :entities, accumulate: true)
+    Module.register_attribute(env.module, :setters, accumulate: true)
+    Module.register_attribute(env.module, :collectors, accumulate: true)
   end
 
   defmacro imports do
@@ -27,6 +30,17 @@ defmodule Kvasir.Agent.Mutator do
     Module.put_attribute(env.module, :object_values, {field, type})
   end
 
+  def add_setter(env, command, name, field) do
+    Module.put_attribute(env.module, :setters, {command, name, field})
+  end
+
+  def add_collector(env, add, remove, name, type, opts) do
+    Module.put_attribute(env.module, :collectors, {add, remove, name, type, opts})
+  end
+
+  def creation(env), do: Module.get_attribute(env.module, :creation)
+  def setters(env), do: Module.get_attribute(env.module, :setters)
+  def collectors(env), do: Module.get_attribute(env.module, :collectors)
   def events(env), do: Module.get_attribute(env.module, :event)
   def executes(env), do: Module.get_attribute(env.module, :execute)
   def object_values(env), do: Module.get_attribute(env.module, :object_values)
@@ -35,10 +49,24 @@ defmodule Kvasir.Agent.Mutator do
   ### Event Apply Generation ###
 
   def gen_apply(env) do
-    generate_apply(events(env), object_values(env), entities(env), [])
+    creation =
+      if c = creation(env) do
+        fields = env.module |> Module.get_attribute(:fields) |> Enum.map(&elem(&1, 0))
+        {c, fields}
+      end
+
+    generate_apply(
+      creation,
+      events(env),
+      object_values(env),
+      entities(env),
+      setters(env),
+      collectors(env),
+      []
+    )
   end
 
-  def generate_apply(events, object_values, entities, path \\ []) do
+  def generate_apply(creation, events, object_values, entities, setters, collectors, path \\ []) do
     base =
       Enum.reduce(
         object_values,
@@ -61,14 +89,131 @@ defmodule Kvasir.Agent.Mutator do
         end
       )
 
-    Enum.reduce(
-      entities,
-      apply,
-      &quote do
-        unquote(generate_apply_forward(&1))
-        unquote(&2)
+    forwards =
+      Enum.reduce(
+        entities,
+        apply,
+        &quote do
+          unquote(generate_apply_forward(&1))
+          unquote(&2)
+        end
+      )
+
+    set =
+      Enum.reduce(
+        setters,
+        forwards,
+        &quote do
+          unquote(&2)
+          unquote(generate_apply_set(&1, path))
+        end
+      )
+
+    collect =
+      Enum.reduce(
+        collectors,
+        set,
+        &quote do
+          unquote(&2)
+          unquote(generate_apply_collect(&1, path))
+        end
+      )
+
+    quote do
+      unquote(generate_apply_creation(creation))
+      unquote(collect)
+    end
+  end
+
+  defp generate_apply_collect({add, remove, name, type, opts}, path) do
+    p = if(name, do: [name | path], else: path)
+
+    field =
+      opts[:field] ||
+        Enum.find_value(add.__command__(:fields), fn {a, _, _} ->
+          if String.starts_with?("#{name}", "#{a}"), do: a
+        end)
+
+    [add_e] = add.__command__(:emits)
+    [remove_e] = remove.__command__(:emits)
+
+    {add_body, remove_body} =
+      case {type, opts[:unique]} do
+        {:map, unique} ->
+          {quote do
+             {:ok, Map.put(current, unquote(unique).(to_add), to_add)}
+           end,
+           quote do
+             {:ok, Map.delete(current, unquote(unique).(to_remove))}
+           end}
+
+        {:list, _} ->
+          {quote do
+             {:ok, [to_add | current]}
+           end,
+           quote do
+             {:ok, Enum.filter(current, &(&1 != to_remove))}
+           end}
       end
+
+    add =
+      generate_apply_rule(
+        {
+          quote(do: %unquote(add_e){unquote(field) => to_add}),
+          quote(do: current),
+          add_body,
+          [guard: nil]
+        },
+        p
+      )
+
+    remove =
+      generate_apply_rule(
+        {
+          quote(do: %unquote(remove_e){unquote(field) => to_remove}),
+          quote(do: current),
+          remove_body,
+          [guard: nil]
+        },
+        p
+      )
+
+    quote do
+      unquote(add)
+      unquote(remove)
+    end
+  end
+
+  defp generate_apply_set({command, name, field}, path) do
+    [event] = command.__command__(:emits)
+
+    generate_apply_rule(
+      {
+        {:%, [], [event, {:%{}, [], [{field, {:a, [], Elixir}}]}]},
+        {:state, [], Elixir},
+        {:ok, {:%{}, [], [{:|, [], [{:state, [], Elixir}, [{name, {:a, [], Elixir}}]]}]}},
+        [guard: nil]
+      },
+      path
     )
+  end
+
+  defp generate_apply_creation(nil), do: nil
+
+  defp generate_apply_creation({{command, _}, mutator_fields}) do
+    fields =
+      :fields
+      |> command.__command__()
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.filter(&(&1 in mutator_fields))
+
+    created_fields = Enum.map(fields, &{&1, {&1, [], Elixir}})
+    event = {:%, [], [List.first(command.__command__(:emits)), {:%{}, [], created_fields}]}
+    created = {:%, [], [{:__MODULE__, [], Elixir}, {:%{}, [], created_fields}]}
+
+    quote do
+      def apply(nil, unquote(event)), do: {:ok, unquote(created)}
+    end
   end
 
   defp generate_apply_rule({event, state, block, opts}, path) do
@@ -154,10 +299,26 @@ defmodule Kvasir.Agent.Mutator do
   ### Execution Generation ###
 
   def gen_exec(env) do
-    generate_execution(executes(env), object_values(env), entities(env), [])
+    generate_execution(
+      creation(env),
+      executes(env),
+      object_values(env),
+      entities(env),
+      setters(env),
+      collectors(env),
+      []
+    )
   end
 
-  def generate_execution(executes, object_values, entities, path \\ []) do
+  def generate_execution(
+        creation,
+        executes,
+        object_values,
+        entities,
+        setters,
+        collectors,
+        path \\ []
+      ) do
     base =
       Enum.reduce(
         object_values,
@@ -180,14 +341,146 @@ defmodule Kvasir.Agent.Mutator do
         end
       )
 
-    Enum.reduce(
-      entities,
-      exec,
-      &quote do
-        unquote(generate_execute_forward(&1))
-        unquote(&2)
+    forwards =
+      Enum.reduce(
+        entities,
+        exec,
+        &quote do
+          unquote(generate_execute_forward(&1))
+          unquote(&2)
+        end
+      )
+
+    set =
+      Enum.reduce(
+        setters,
+        forwards,
+        &quote do
+          unquote(&2)
+          unquote(generate_execute_set(&1, path))
+        end
+      )
+
+    collect =
+      Enum.reduce(
+        collectors,
+        set,
+        &quote do
+          unquote(&2)
+          unquote(generate_execute_collect(&1, path))
+        end
+      )
+
+    quote do
+      unquote(generate_execute_creation(creation))
+      unquote(collect)
+    end
+  end
+
+  defp generate_execute_collect({add, remove, name, type, opts}, path) do
+    p = if(name, do: [name | path], else: path)
+
+    field =
+      opts[:field] ||
+        Enum.find_value(add.__command__(:fields), fn {a, _, _} ->
+          if String.starts_with?("#{name}", "#{a}"), do: a
+        end)
+
+    {add_body, remove_body} =
+      case {type, opts[:unique]} do
+        {:map, unique} ->
+          {quote do
+             if Map.has_key?(current, unquote(unique).(to_add)),
+               do: {:error, unquote(:"#{field}_already_added")},
+               else: unquote(add).to_event(c)
+           end,
+           quote do
+             if Map.has_key?(current, unquote(unique).(to_remove)),
+               do: unquote(remove).to_event(c),
+               else: {:error, unquote(:"#{field}_not_added")}
+           end}
+
+        {:list, _} ->
+          {quote do
+             if to_add in current,
+               do: {:error, unquote(:"#{field}_already_added")},
+               else: unquote(add).to_event(c)
+           end,
+           quote do
+             if to_remove in current,
+               do: unquote(remove).to_event(c),
+               else: {:error, unquote(:"#{field}_not_added")}
+           end}
       end
+
+    add =
+      generate_execute(
+        {
+          quote(do: c = %unquote(add){unquote(field) => to_add}),
+          quote(do: current),
+          add_body,
+          [guard: nil]
+        },
+        p
+      )
+
+    remove =
+      generate_execute(
+        {
+          quote(do: c = %unquote(remove){unquote(field) => to_remove}),
+          quote(do: current),
+          remove_body,
+          [guard: nil]
+        },
+        p
+      )
+
+    quote do
+      unquote(add)
+      unquote(remove)
+    end
+  end
+
+  defp generate_execute_set({command, name, field}, path) do
+    generate_execute(
+      {
+        quote(do: c = %unquote(command){unquote(field) => new}),
+        quote(do: %{unquote(name) => current}),
+        quote do
+          if new == current,
+            do: {:error, unquote(:"#{name}_already_set")},
+            else: unquote(command).to_event(c)
+        end,
+        [guard: nil]
+      },
+      path
     )
+  end
+
+  defp generate_execute_creation(nil), do: nil
+
+  defp generate_execute_creation({command, opts}) do
+    tag = if(t = opts[:tag], do: "#{t}_", else: "")
+    cmd = {:%, [], [command, {:%{}, [], []}]}
+
+    exec =
+      if v = opts[:validate] do
+        quote do
+          def execute(nil, c = unquote(cmd)) do
+            with :ok <- unquote(v).(c), do: unquote(command).to_event(c)
+          end
+        end
+      else
+        quote do
+          def execute(nil, c = unquote(cmd)), do: unquote(command).to_event(c)
+        end
+      end
+
+    quote do
+      unquote(exec)
+      def execute(_, unquote(cmd)), do: {:error, unquote(:"#{tag}already_exists")}
+      def execute(nil, _), do: {:error, unquote(:"#{tag}does_not_exist")}
+    end
   end
 
   defp generate_execute_forward({name, entity}) do
@@ -352,7 +645,7 @@ defmodule Kvasir.Agent.Mutator do
   end
 
   defmacro execute(command, state_or_opts, do: block) do
-    if is_list(state_or_opts) do
+    if is_list(state_or_opts) and state_or_opts != [] do
       add_execute(
         __CALLER__,
         command,
