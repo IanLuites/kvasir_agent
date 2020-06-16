@@ -246,8 +246,10 @@ defmodule Kvasir.Command.RemoteDispatcher do
   def dispatcher(module, opts) do
     backend =
       case opts[:mode] do
-        :test -> test_backend(opts)
+        :discard -> placeholder_backend(opts)
+        :log -> log_backend(opts)
         :placeholder -> placeholder_backend(opts)
+        :test -> test_backend(opts)
         _ -> http_backend(opts)
       end
 
@@ -315,6 +317,37 @@ defmodule Kvasir.Command.RemoteDispatcher do
       end
     else
       placeholder_backend(opts)
+    end
+  end
+
+  @doc false
+  @spec log_backend(Keyword.t()) :: term
+  def log_backend(opts) do
+    level = opts[:log_level] || :debug
+
+    quote do
+      @doc false
+      @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+      def do_dispatch(command) do
+        require Logger
+
+        cmd = unquote(__MODULE__).set_relevant_timestamps(command)
+
+        {:ok, %{meta: %{scope: [:instance, i]}, payload: p, type: t}} =
+          unquote(Kvasir.Command).encode(cmd)
+
+        Logger.log(
+          unquote(level),
+          "#{inspect(__MODULE__ |> Module.split() |> Enum.slice(0..-2) |> Module.concat())}<#{i}>: #{
+            inspect(cmd)
+          }",
+          instance: i,
+          command: t,
+          payload: p
+        )
+
+        {:ok, cmd}
+      end
     end
   end
 
