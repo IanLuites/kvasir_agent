@@ -118,8 +118,13 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @spec dispatch(Kvasir.Command.t(), Keyword.t()) ::
               {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
-      def dispatch(command, opts \\ []),
-        do: Kvasir.Command.Dispatcher.dispatch(__MODULE__, command, opts)
+      def dispatch(command, opts \\ []) do
+        if opts[:dry_run] do
+          {:ok, unquote(__MODULE__).set_relevant_timestamps(command)}
+        else
+          Kvasir.Command.Dispatcher.dispatch(__MODULE__, command, opts)
+        end
+      end
 
       @doc false
       @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
