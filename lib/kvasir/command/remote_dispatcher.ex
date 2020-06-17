@@ -48,6 +48,30 @@ defmodule Kvasir.Command.RemoteDispatcher do
       ## Examples
 
       ```elixir
+      iex> dispatch!(<cmd>, <payload>, instance: <id>)
+      <cmd>
+      ```
+      """
+      @spec dispatch!(command :: module, payload :: map | Keyword.t(), Keyword.t()) ::
+              Kvasir.Command.t() | no_return
+      def dispatch!(command, payload, opts) do
+        case dispatch(command, payload, opts) do
+          {:ok, cmd} ->
+            cmd
+
+          {:error, err} ->
+            raise "#{inspect(__MODULE__)}: Failed to #{opts[:wait] || :dispatch} command. (#{
+                    inspect(err)
+                  })"
+        end
+      end
+
+      @doc ~S"""
+      Dispatch a command to commander, raises on failure.
+
+      ## Examples
+
+      ```elixir
       iex> dispatch!(<cmd>, instance: <id>)
       <cmd>
       ```
@@ -63,6 +87,22 @@ defmodule Kvasir.Command.RemoteDispatcher do
                     inspect(err)
                   })"
         end
+      end
+
+      @doc ~S"""
+      Dispatch a command to commander.
+
+      ## Examples
+
+      ```elixir
+      iex> dispatch(<cmd>, instance: <id>)
+      {:ok, <cmd>}
+      ```
+      """
+      @spec dispatch(command :: module, payload :: map | Keyword.t(), Keyword.t()) ::
+              {:ok, Kvasir.Command.t()} | {:error, atom}
+      def dispatch(command, payload, opts) do
+        with {:ok, cmd} <- command.create(payload), do: dispatch(cmd, opts)
       end
 
       @doc ~S"""
