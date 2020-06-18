@@ -11,6 +11,8 @@ defmodule Kvasir.Command.RemoteDispatcher do
     dispatcher(d, opts)
 
     quote do
+      @command_opts ~w(instance wait dry_run)a
+
       @doc ~S"""
       Configure the remote dispatcher.
 
@@ -43,7 +45,7 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @behaviour Kvasir.Command.Dispatcher
 
       @doc ~S"""
-      Dispatch a command to commander, raises on failure.
+      Dispatch a command with given payload to commander, raises on failure.
 
       ## Examples
 
@@ -90,7 +92,7 @@ defmodule Kvasir.Command.RemoteDispatcher do
       end
 
       @doc ~S"""
-      Dispatch a command to commander.
+      Dispatch and create a command  with given payload to commander.
 
       ## Examples
 
@@ -115,10 +117,18 @@ defmodule Kvasir.Command.RemoteDispatcher do
       {:ok, <cmd>}
       ```
       """
-      @spec dispatch(Kvasir.Command.t(), Keyword.t()) ::
+      @spec dispatch(Kvasir.Command.t() | module, Keyword.t()) ::
               {:ok, Kvasir.Command.t()} | {:error, atom}
       @impl Kvasir.Command.Dispatcher
-      def dispatch(command, opts \\ []) do
+      def dispatch(command, opts \\ [])
+
+      def dispatch(command, opts) when is_atom(command) do
+        {o, p} = Keyword.split(opts, @command_opts)
+
+        with {:ok, cmd} <- command.create(p), do: dispatch(cmd, o)
+      end
+
+      def dispatch(command, opts) do
         if opts[:dry_run] do
           {:ok, unquote(__MODULE__).set_relevant_timestamps(command)}
         else
