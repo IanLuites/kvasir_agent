@@ -64,7 +64,7 @@ defmodule Kvasir.Agent.MixProject do
   defp deps do
     [
       {:kvasir, git: "https://github.com/IanLuites/kvasir", branch: "release/v1.0"},
-      {:httpx, "~> 0.0.16", optional: true}
+      {:httpx, ">= 0.0.16", optional: true}
     ]
   end
 end
