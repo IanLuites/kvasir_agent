@@ -305,21 +305,24 @@ defmodule Kvasir.Command.RemoteDispatcher do
         :log -> log_backend(opts)
         :placeholder -> placeholder_backend(opts)
         :test -> test_backend(opts)
+        :none -> false
         _ -> http_backend(opts)
       end
 
-    Code.compiler_options(ignore_module_conflict: true)
+    if backend do
+      Code.compiler_options(ignore_module_conflict: true)
 
-    Code.compile_quoted(
-      quote do
-        defmodule unquote(module) do
-          @moduledoc false
-          unquote(backend)
+      Code.compile_quoted(
+        quote do
+          defmodule unquote(module) do
+            @moduledoc false
+            unquote(backend)
+          end
         end
-      end
-    )
+      )
 
-    Code.compiler_options(ignore_module_conflict: false)
+      Code.compiler_options(ignore_module_conflict: false)
+    end
 
     :ok
   end
