@@ -248,7 +248,8 @@ defmodule Kvasir.Agent do
 
     %{
       id: agent,
-      start: {Kvasir.Agent.Supervisor, :start_link, [config]}
+      start: {Kvasir.Agent.Supervisor, :start_link, [config]},
+      type: :supervisor
     }
   end
 end

@@ -45,7 +45,8 @@ defmodule Kvasir.Agent.Supervisor do
       Enum.map(0..(partitions - 1), fn p ->
         %{
           id: :"supervisor#{p}",
-          start: {PartitionSupervisor, :start_link, [config, p]}
+          start: {PartitionSupervisor, :start_link, [config, p]},
+          type: :supervisor
         }
       end)
 
