@@ -22,19 +22,21 @@ defmodule Kvasir.Agent.Instance do
           agent: agent,
           partition: partition,
           id: id,
-          cache: cache,
+          cache: cache_mod,
           topic: topic,
           model: model
         }
       ) do
     Logger.debug(fn -> "Agent<#{state.id}>: Init (#{inspect(self())})" end)
 
-    with {:ok, {offset, agent_state, _}} <-
-           load_state(source, cache, topic, model, agent, partition, id) do
+    with {:ok, c} <- cache_mod.cache(agent, partition, id),
+         cache = {cache_mod, c},
+         {:ok, {offset, agent_state}} <- load_state(source, cache, topic, model, id) do
       state =
         state
         |> Map.put(:agent_state, agent_state)
         |> Map.put(:offset, offset)
+        |> Map.put(:cache, cache)
         |> Map.put(:callbacks, %{})
 
       keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
@@ -42,25 +44,25 @@ defmodule Kvasir.Agent.Instance do
     end
   end
 
-  defp load_state(source, cache, topic, model, agent, partition, id) do
-    case cache.load(agent, partition, id) do
-      {:ok, offset, nil} ->
+  defp load_state(source, {cache_m, cache_i}, topic, model, id) do
+    case cache_m.load(cache_i) do
+      :no_previous_state ->
         Logger.debug(fn -> "Agent<#{id}>: State Loaded: No State, Setup New" end)
-        {:ok, {offset, model.base(id), :no_tracking}}
+        {:ok, {Kvasir.Offset.create(), model.base(id)}}
 
       {:ok, offset, state} ->
         Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{inspect(offset)}" end)
         # build_state(source, topic, model, id, offset, state)
-        {:ok, {offset, state, :no_tracking}}
+        {:ok, {offset, state}}
 
-      {:error, :state_counter_mismatch, correct, loaded} ->
+      {:error, :corrupted_state} ->
         Logger.debug(fn ->
-          "Agent<#{id}>: State Load Failed: Command Counter Mismatch #{correct} != #{loaded} (tracked, state)"
+          "Agent<#{id}>: State Load Failed: Corrupted State"
         end)
 
-        with r = {:ok, {offset, agent_state, _}} <-
+        with r = {:ok, {offset, agent_state}} <-
                build_state(source, topic, model, id, nil, model.base(id)) do
-          cache.save(agent, partition, id, agent_state, offset, correct)
+          cache_m.save(cache_i, agent_state, offset)
           r
         end
 
@@ -80,8 +82,7 @@ defmodule Kvasir.Agent.Instance do
 
   defp state_reducer(model, event, {offset, state, true}) do
     with {:ok, updated_state} <- model.apply(state, event) do
-      {:ok,
-       {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state, true}}
+      {:ok, {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state}}
     end
   end
 
@@ -90,7 +91,7 @@ defmodule Kvasir.Agent.Instance do
          Offset.get(offset, event.__meta__.partition) < event.__meta__.offset do
       state_reducer(model, event, {offset, state, true})
     else
-      {:ok, {offset, state, false}}
+      {:ok, {offset, state}}
     end
   end
 
@@ -98,26 +99,25 @@ defmodule Kvasir.Agent.Instance do
   def handle_info(
         {:command, from, command},
         state = %{
-          agent: agent,
           agent_state: agent_state,
-          cache: cache,
-          id: id,
+          cache: {cache_m, cache_i},
           model: model,
           partition: p
         }
       ) do
-    {:ok, counter} = cache.track_command(agent, p, id)
     pause_keep_alive(state)
-    Logger.debug(fn -> "Agent<#{state.id}>: Command<#{counter}>: #{inspect(command)}" end)
+    Logger.debug(fn -> "Agent<#{state.id}>: Command: #{inspect(command)}" end)
 
     ref = command.__meta__.id
 
     response =
       case model.execute(agent_state, command) do
         {:ok, events} when is_list(events) ->
+          :ok = cache_m.track_command(cache_i)
           commit_events(state, events, ref)
 
         {:ok, event} ->
+          :ok = cache_m.track_command(cache_i)
           commit_events(state, [event], ref)
 
         :ok ->
@@ -131,7 +131,7 @@ defmodule Kvasir.Agent.Instance do
       {:ok, events} ->
         send(from, {:command, ref, {:ok, Offset.create(p, List.last(events).__meta__.offset)}})
 
-        with {:ok, state} <- apply_events(events, state, counter),
+        with {:ok, state} <- apply_events(events, state),
              do: {:noreply, reset_keep_alive(state)}
 
       _ ->
@@ -140,10 +140,8 @@ defmodule Kvasir.Agent.Instance do
     end
   end
 
-  def handle_info({:event, event}, state = %{agent: agent, cache: cache, id: id, partition: p}) do
-    with {:ok, counter} <- cache.command_track(agent, p, id),
-         {:ok, state} <- apply_events([event], state, counter),
-         do: {:noreply, state}
+  def handle_info({:event, event}, state) do
+    with {:ok, state} <- apply_events([event], state), do: {:noreply, state}
   end
 
   def handle_info({:offset_callback, from, ref, offset}, state) do
@@ -161,52 +159,49 @@ defmodule Kvasir.Agent.Instance do
     {:reply, state.agent_state, state}
   end
 
-  defp apply_events(events, state, counter, offset \\ nil)
+  defp apply_events(events, state) do
+    with {:ok, new_state = %{offset: o}, updated} <- do_apply_events(events, state) do
+      if updated do
+        {cache_m, cache_i} = state.cache
+        :ok = cache_m.save(cache_i, new_state.agent_state, o)
+      end
 
-  defp apply_events([], state, _counter, offset),
-    do: {:ok, if(offset, do: notify_offset_callbacks(state, offset), else: state)}
+      notify_offset_callbacks(new_state, o)
 
-  defp apply_events([event | events], state = %{offset: o}, counter, c_offset) do
+      {:ok, new_state}
+    end
+  end
+
+  defp do_apply_events(events, state, updated \\ false)
+
+  defp do_apply_events([], state, updated), do: {:ok, state, updated}
+
+  defp do_apply_events([event | events], state = %{offset: o}, updated) do
     Logger.debug(fn -> "Agent<#{state.id}>: Incoming Event (#{inspect(event)})" end)
     %{offset: offset, partition: partition} = event.__meta__
 
     if Offset.empty?(o) or Offset.get(o, event.__meta__.partition) < offset do
       case state.model.apply(state.agent_state, event) do
+        :ok ->
+          do_apply_events(events, state, updated)
+
         {:ok, updated_state} ->
           updated_offset = Offset.set(state.offset, partition, offset)
-          # Ian:
-          #  OK, so on new command, generate events, then set a transaction.
-          #  This transaction indicates new events.
-          #  If the state then shows that the transaction is incomplete.
-          #  Only then needs the eventsource be read.
-          if events == [] do
-            state.cache.save(
-              state.agent,
-              partition,
-              state.id,
-              updated_state,
-              updated_offset,
-              counter
-            )
-          end
-
-          state = %{state | offset: updated_offset, agent_state: updated_state}
-          apply_events(events, state, updated_offset)
-
-        :ok ->
-          apply_events(events, state, c_offset)
+          new_state = %{state | offset: updated_offset, agent_state: updated_state}
+          do_apply_events(events, new_state, true)
 
         {:error, reason} ->
-          if Kvasir.Event.on_error(:on_error) == :halt do
+          if Kvasir.Event.on_error(event) == :halt do
             Logger.error(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
             {:stop, :invalid_event, state}
           else
             Logger.warn(fn -> "Agent<#{state.id}>: Event error (#{inspect(reason)})" end)
-            apply_events(events, state, c_offset)
+            # Should this be true? We updated by skipping I guess
+            do_apply_events(events, state, true)
           end
       end
     else
-      apply_events(events, state, c_offset)
+      do_apply_events(events, state, updated)
     end
   end
 
