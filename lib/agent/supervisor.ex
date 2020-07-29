@@ -1,9 +1,23 @@
 defmodule Kvasir.Agent.Supervisor do
-  use Supervisor
+  # use Supervisor
   alias Kvasir.Agent.PartitionSupervisor
 
-  def start_link(config = %{agent: agent}) do
-    Supervisor.start_link(__MODULE__, config, name: :"#{agent}.Supervisor")
+  def start_link(config = %{agent: agent, source: source, topic: topic}) do
+    # Supervisor.start_link(__MODULE__, config, name: :"#{agent}.Supervisor")
+    with {:ok, pid} <-
+           DynamicSupervisor.start_link(strategy: :one_for_one, name: :"#{agent}.Supervisor") do
+      partitions = source.__topics__()[topic].partitions
+
+      Enum.each(0..(partitions - 1), fn p ->
+        DynamicSupervisor.start_child(pid, %{
+          id: :"supervisor#{p}",
+          start: {PartitionSupervisor, :start_link, [config, p]},
+          type: :supervisor
+        })
+      end)
+
+      {:ok, pid}
+    end
   end
 
   def open(registry, agent, partition, id) do
@@ -37,19 +51,18 @@ defmodule Kvasir.Agent.Supervisor do
 
   def alive?(config, partition, id), do: whereis(config, partition, id) != nil
 
-  # @spec init(module, module) ::
-  def init(config = %{source: source}) do
-    partitions = source.__topics__()[config.topic].partitions
+  # def init(config = %{source: source}) do
+  #   partitions = source.__topics__()[config.topic].partitions
 
-    children =
-      Enum.map(0..(partitions - 1), fn p ->
-        %{
-          id: :"supervisor#{p}",
-          start: {PartitionSupervisor, :start_link, [config, p]},
-          type: :supervisor
-        }
-      end)
+  #   children =
+  #     Enum.map(0..(partitions - 1), fn p ->
+  #       %{
+  #         id: :"supervisor#{p}",
+  #         start: {PartitionSupervisor, :start_link, [config, p]},
+  #         type: :supervisor
+  #       }
+  #     end)
 
-    Supervisor.init(children, strategy: :one_for_one)
-  end
+  #   Supervisor.init(children, strategy: :one_for_one)
+  # end
 end
