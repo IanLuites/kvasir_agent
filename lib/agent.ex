@@ -14,7 +14,7 @@ defmodule Kvasir.Agent do
     partitions = source.__topics__()[topic].partitions
 
     # Disabled environments
-    unless Mix.env() in (opts[:disable] || []) do
+    unless ApplicationX.mix_env() in (opts[:disable] || []) do
       quote do
         use Kvasir.Command.Dispatcher
         alias Kvasir.Agent
