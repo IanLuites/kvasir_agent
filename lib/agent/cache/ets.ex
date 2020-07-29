@@ -1,7 +1,6 @@
 defmodule Kvasir.Agent.Cache.ETS do
   @behaviour Kvasir.Agent.Cache
   @storage_table __MODULE__
-  @tracker_table __MODULE__.Tracks
 
   @impl Kvasir.Agent.Cache
   def init(_agent, _partition, _) do
@@ -9,33 +8,48 @@ defmodule Kvasir.Agent.Cache.ETS do
   end
 
   @impl Kvasir.Agent.Cache
-  def track_command(agent, _partition, id) do
+  def cache(agent, _partition, id), do: {:ok, {agent, id}}
+
+  @impl Kvasir.Agent.Cache
+  def track_command(cache) do
     ensure_storage_table_created()
-    counter = command_count(agent, id) + 1
 
-    :ets.insert(@tracker_table, {{agent, id}, counter})
+    case load(cache) do
+      {:ok, offset, data} ->
+        :ets.insert(@storage_table, {cache, true, data, offset})
 
-    {:ok, counter}
+      :no_previous_state ->
+        :ets.insert(@storage_table, {cache, true})
+
+      err ->
+        err
+    end
   end
 
   @impl Kvasir.Agent.Cache
-  def save(module, _partition, id, data, offset, command_counter) do
+  def save(cache, data, offset) do
     ensure_storage_table_created()
 
-    :ets.insert(@storage_table, {{module, id}, data, offset, command_counter})
+    :ets.insert(@storage_table, {cache, false, data, offset})
+    :ok
   end
 
   @impl Kvasir.Agent.Cache
-  def load(module, _partition, id) do
+  def load(cache) do
     ensure_storage_table_created()
-    counter = command_count(module, id)
 
-    case :ets.lookup(@storage_table, {module, id}) do
-      [{_, data, offset, commands}] ->
-        if counter == commands do
-          {:ok, offset, data}
+    case :ets.lookup(@storage_table, cache) do
+      [] ->
+        :no_previous_state
+
+      [{_, true}] ->
+        {:error, :corrupted_state}
+
+      [{_, processing, data, offset}] ->
+        if processing do
+          {:error, :corrupted_state}
         else
-          {:error, :state_counter_mismatch, counter, commands}
+          {:ok, offset, data}
         end
 
       _ ->
@@ -44,20 +58,11 @@ defmodule Kvasir.Agent.Cache.ETS do
   end
 
   @impl Kvasir.Agent.Cache
-  def delete(module, _partition, id) do
+  def delete(cache) do
     ensure_storage_table_created()
-    :ets.delete(@storage_table, {module, id})
-    :ets.delete(@tracker_table, {module, id})
+    :ets.delete(@storage_table, cache)
 
     :ok
-  end
-
-  @spec command_count(module, term) :: non_neg_integer()
-  defp command_count(module, id) do
-    case :ets.lookup(@tracker_table, {module, id}) do
-      [{_, command_counter}] -> command_counter
-      _ -> 0
-    end
   end
 
   @spec ensure_storage_table_created :: :ok
@@ -65,11 +70,6 @@ defmodule Kvasir.Agent.Cache.ETS do
     case :ets.info(@storage_table) do
       :undefined -> :ets.new(@storage_table, [:set, :public, :named_table])
       _ -> @storage_table
-    end
-
-    case :ets.info(@tracker_table) do
-      :undefined -> :ets.new(@tracker_table, [:set, :public, :named_table])
-      _ -> @tracker_table
     end
   end
 end

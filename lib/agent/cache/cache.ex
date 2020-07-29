@@ -1,21 +1,25 @@
 defmodule Kvasir.Agent.Cache do
+  @type ref :: term()
+
   @callback init(agent :: module, partition :: non_neg_integer(), opts :: Keyword.t()) ::
               :ok | {:ok, map}
 
-  @callback track_command(agent :: module, partition :: non_neg_integer(), id :: term) ::
-              {:ok, non_neg_integer()} | {:error, atom}
+  @callback cache(agent :: module, partition :: non_neg_integer(), id :: term) ::
+              {:ok, ref}
 
-  @callback load(agent :: module, partition :: non_neg_integer(), id :: term) ::
-              {:ok, Kvasir.Offset.t(), map} | {:error, atom}
+  @callback track_command(ref) :: :ok | {:error, atom}
+
+  @callback load(ref) ::
+              {:ok, Kvasir.Offset.t(), map}
+              | :no_previous_state
+              | {:error, atom}
+
   @callback save(
-              agent :: module,
-              partition :: non_neg_integer(),
-              id :: term,
+              cache :: ref,
               data :: map,
-              offset :: Kvasir.Offset.t(),
-              command_counter :: non_neg_integer()
+              offset :: Kvasir.Offset.t()
             ) ::
               :ok | {:error, atom}
-  @callback delete(agent :: module, partition :: non_neg_integer(), id :: term) ::
-              :ok | {:error, atom}
+
+  @callback delete(ref) :: :ok | {:error, atom}
 end
