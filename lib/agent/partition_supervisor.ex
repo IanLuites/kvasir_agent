@@ -35,7 +35,15 @@ defmodule Kvasir.Agent.PartitionSupervisor do
       },
       %{
         id: :registry,
-        start: {Registry, :start_link, [[keys: :unique, name: agent.__registry__(partition)]]}
+        start:
+          {Registry, :start_link,
+           [
+             [
+               keys: :unique,
+               name: agent.__registry__(partition),
+               partitions: System.schedulers_online()
+             ]
+           ]}
       }
     ]
 
