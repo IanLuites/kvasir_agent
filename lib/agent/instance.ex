@@ -2,7 +2,8 @@ defmodule Kvasir.Agent.Instance do
   use GenServer
   require Logger
   alias Kvasir.Offset
-  @keep_alive 60_000
+  @keep_alive 15 * 60_000
+  @keep_hibernated 5 * @keep_alive
 
   def start_agent(agent, partition, id, opts) do
     config =
@@ -176,6 +177,16 @@ defmodule Kvasir.Agent.Instance do
     {:noreply, add_offset_callback(state, {from, ref}, offset)}
   end
 
+  def handle_info({:hibernate, reason}, state) do
+    Logger.debug(fn -> "Agent<#{state.id}>: Hibernate (#{inspect(reason)})" end)
+
+    hibernate =
+      if @keep_hibernated != :infinity,
+        do: Process.send_after(self(), {:shutdown, :hibernated}, @keep_hibernated)
+
+    {:noreply, %{state | hibernate: hibernate}, :hibernate}
+  end
+
   def handle_info({:shutdown, reason}, state) do
     Logger.debug(fn -> "Agent<#{state.id}>: Shutdown (#{inspect(reason)})" end)
     {:stop, :shutdown, state}
@@ -232,13 +243,23 @@ defmodule Kvasir.Agent.Instance do
     end
   end
 
-  defp pause_keep_alive(%{keep_alive: nil}), do: :ok
-  defp pause_keep_alive(%{keep_alive: ref}), do: Process.cancel_timer(ref)
+  defp pause_keep_alive(%{hibernate: h_ref, keep_alive: a_ref}) do
+    h_ref && Process.cancel_timer(h_ref)
+    a_ref && Process.cancel_timer(h_ref)
+
+    :ok
+  end
 
   defp reset_keep_alive(state = %{keep_alive: nil}), do: state
 
   defp reset_keep_alive(state) do
-    %{state | keep_alive: Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)}
+    pause_keep_alive(state)
+
+    %{
+      state
+      | hibernate: nil,
+        keep_alive: Process.send_after(self(), {:hibernate, :keep_alive}, @keep_alive)
+    }
   end
 
   defp commit_events(state = %{source: source, topic: topic}, events, ref) do
