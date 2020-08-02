@@ -15,7 +15,26 @@ defmodule Kvasir.Agent.Instance do
     GenServer.start_link(__MODULE__, config, opts)
   end
 
+  def pre_start_agent(agent, partition, id, offset, state, cache, opts \\ []) do
+    config =
+      :config
+      |> agent.__agent__()
+      |> Map.put(:id, id)
+      |> Map.put(:partition, partition)
+      |> Map.put(:agent_state, state)
+      |> Map.put(:offset, offset)
+      |> Map.put(:cache, cache)
+      |> Map.put(:callbacks, %{})
+
+    GenServer.start_link(__MODULE__, {:preload, config}, opts)
+  end
+
   @impl GenServer
+  def init({:preload, state}) do
+    Logger.debug(fn -> "Agent<#{state.id}>: Preloaded-Init (#{inspect(self())})" end)
+    initialize(state)
+  end
+
   def init(
         state = %{
           source: source,
@@ -32,16 +51,24 @@ defmodule Kvasir.Agent.Instance do
     with {:ok, c} <- cache_mod.cache(agent, partition, id),
          cache = {cache_mod, c},
          {:ok, {offset, agent_state}} <- load_state(source, cache, topic, model, id) do
-      state =
-        state
-        |> Map.put(:agent_state, agent_state)
-        |> Map.put(:offset, offset)
-        |> Map.put(:cache, cache)
-        |> Map.put(:callbacks, %{})
-
-      keep_alive = Process.send_after(self(), {:shutdown, :keep_alive}, @keep_alive)
-      {:ok, Map.put(state, :keep_alive, keep_alive)}
+      state
+      |> Map.put(:agent_state, agent_state)
+      |> Map.put(:offset, offset)
+      |> Map.put(:cache, cache)
+      |> Map.put(:callbacks, %{})
+      |> initialize()
     end
+  end
+
+  @spec initialize(map) :: {:ok, map}
+  defp initialize(state) do
+    Logger.debug(fn -> "Agent<#{state.id}>: Initialized" end)
+
+    keep_alive =
+      if @keep_alive != :infinity,
+        do: Process.send_after(self(), {:hibernate, :keep_alive}, @keep_alive)
+
+    {:ok, state |> Map.put(:hibernate, nil) |> Map.put(:keep_alive, keep_alive)}
   end
 
   defp load_state(source, {cache_m, cache_i}, topic, model, id) do
