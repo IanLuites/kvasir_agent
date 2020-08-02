@@ -24,6 +24,10 @@ defmodule Kvasir.Agent.Supervisor do
     registry.start_child(agent, partition, id)
   end
 
+  def preload(registry, agent, partition, id, offset, state, cache) do
+    registry.start_child(agent, partition, id, offset, state, cache)
+  end
+
   def count(agent, partitions) do
     0..(partitions - 1)
     |> Enum.map(&PartitionSupervisor.count(agent, &1))
