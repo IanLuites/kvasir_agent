@@ -1,10 +1,8 @@
 defmodule Kvasir.Agent.PartitionSupervisor do
   use Supervisor
 
-  def start_link(config = %{agent: agent}, partition) do
-    Supervisor.start_link(__MODULE__, Map.put(config, :partition, partition),
-      name: agent.__supervisor__(partition)
-    )
+  def start_link(config, partition) do
+    Supervisor.start_link(__MODULE__, Map.put(config, :partition, partition))
   end
 
   def open(registry, agent, partition, id),
@@ -31,10 +29,12 @@ defmodule Kvasir.Agent.PartitionSupervisor do
     children = [
       %{
         id: :manager,
+        type: :worker,
         start: {Kvasir.Agent.Manager, :start_link, [config, partition]}
       },
       %{
         id: :registry,
+        type: :worker,
         start:
           {Registry, :start_link,
            [
@@ -44,12 +44,19 @@ defmodule Kvasir.Agent.PartitionSupervisor do
                partitions: System.schedulers_online()
              ]
            ]}
+      },
+      %{
+        id: :instance_supervisor,
+        type: :supervisor,
+        start:
+          {DynamicSupervisor, :start_link,
+           [[strategy: :one_for_one, name: agent.__supervisor__(partition)]]}
       }
     ]
 
     case cache.init(agent, partition, agent.config(:cache, cache_opts)) do
-      :ok -> Supervisor.init(children, strategy: :one_for_one)
-      {:ok, child} -> Supervisor.init([child | children], strategy: :one_for_one)
+      :ok -> Supervisor.init(children, strategy: :rest_for_one)
+      {:ok, child} -> Supervisor.init([child | children], strategy: :rest_for_one)
     end
   end
 end

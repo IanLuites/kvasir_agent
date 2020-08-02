@@ -7,13 +7,17 @@ defmodule Kvasir.Agent.Registry.Local do
     via_name = {:via, Registry, {agent.__registry__(partition), id}}
     supervisor = agent.__supervisor__(partition)
 
-    case Supervisor.start_child(supervisor, %{
+    case DynamicSupervisor.start_child(supervisor, %{
            id: child,
            start: {Kvasir.Agent.Instance, :start_agent, [agent, partition, id, [name: via_name]]},
            restart: :transient
          }) do
       {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, :already_present} -> Supervisor.restart_child(supervisor, child)
+      # {:error, :already_present} -> DynamicSupervisor.restart_child(supervisor, child)
+      reply -> reply
+    end
+  end
+
   @impl Kvasir.Agent.Registry
   def start_child(agent, partition, id, offset, state, cache) do
     child = {:agent, id}

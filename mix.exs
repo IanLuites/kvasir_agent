@@ -63,6 +63,7 @@ defmodule Kvasir.Agent.MixProject do
 
   defp deps do
     [
+      {:common_x, ">= 0.0.0"},
       {:kvasir, git: "https://github.com/IanLuites/kvasir", branch: "release/v1.0"},
       {:httpx, ">= 0.0.16", optional: true}
     ]
