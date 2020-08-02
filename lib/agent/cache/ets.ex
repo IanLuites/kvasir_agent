@@ -27,6 +27,18 @@ defmodule Kvasir.Agent.Cache.ETS do
   end
 
   @impl Kvasir.Agent.Cache
+  def stream(agent) do
+    ensure_storage_table_created()
+    |> :ets.tab2list()
+    |> Stream.filter(&(elem(elem(&1, 0), 0) == agent))
+    |> Stream.map(fn
+      {{_, id}, true} -> {id, :corrupted_state}
+      {{_, id}, true, _, _} -> {id, :corrupted_state}
+      {c = {_, k}, false, state, offset} -> {k, offset, state, c}
+    end)
+  end
+
+  @impl Kvasir.Agent.Cache
   def save(cache, data, offset) do
     ensure_storage_table_created()
 

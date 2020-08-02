@@ -22,4 +22,6 @@ defmodule Kvasir.Agent.Cache do
               :ok | {:error, atom}
 
   @callback delete(ref) :: :ok | {:error, atom}
+
+  @callback stream(agent :: module) :: Stream.t()
 end
