@@ -13,6 +13,40 @@ defmodule Kvasir.Agent do
     registry = Kvasir.Agent.Config.registry!(opts)
     partitions = source.__topics__()[topic].partitions
 
+    warmup =
+      if cache do
+        quote do
+          @doc false
+          @spec warmup :: non_neg_integer
+          def warmup do
+            __MODULE__
+            |> unquote(cache).stream()
+            |> Stream.each(fn
+              {id, offset, state, cache} ->
+                Supervisor.preload(
+                  unquote(registry),
+                  __MODULE__,
+                  @key.partition!(id, @partitions),
+                  id,
+                  offset,
+                  state,
+                  cache
+                )
+
+              {i, :corrupted_state} ->
+                __MODULE__.open(i)
+            end)
+            |> Enum.count()
+          end
+        end
+      else
+        quote do
+          @doc false
+          @spec warmup :: non_neg_integer
+          def warmup, do: 0
+        end
+      end
+
     # Disabled environments
     unless ApplicationX.mix_env() in (opts[:disable] || []) do
       quote do
@@ -32,7 +66,7 @@ defmodule Kvasir.Agent do
 
         @doc false
         @spec child_spec(Keyword.t()) :: map
-        def child_spec(_opts \\ []), do: Agent.child_spec(__agent__(:config))
+        def child_spec(opts \\ []), do: Agent.child_spec(__agent__(:config), opts)
 
         @doc false
         @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
@@ -72,6 +106,8 @@ defmodule Kvasir.Agent do
         @spec open(any) :: {:ok, pid} | {:error, atom}
         def open(id),
           do: Supervisor.open(unquote(registry), __MODULE__, @key.partition!(id, @partitions), id)
+
+        unquote(warmup)
 
         @doc ~S"""
         Inspect the current state of an agent instance.
@@ -243,8 +279,9 @@ defmodule Kvasir.Agent do
     end
   end
 
-  def child_spec(config = %{agent: agent}) do
-    Kvasir.Command.RegistryGenerator.create()
+  def child_spec(config = %{agent: agent}, opts \\ []) do
+    if Keyword.get(opts, :generate_command_registry, true),
+      do: Kvasir.Command.RegistryGenerator.create()
 
     %{
       id: agent,
