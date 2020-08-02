@@ -245,7 +245,7 @@ defmodule Kvasir.Agent.Instance do
 
   defp pause_keep_alive(%{hibernate: h_ref, keep_alive: a_ref}) do
     h_ref && Process.cancel_timer(h_ref)
-    a_ref && Process.cancel_timer(h_ref)
+    a_ref && Process.cancel_timer(a_ref)
 
     :ok
   end
