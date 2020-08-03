@@ -306,6 +306,8 @@ defmodule Kvasir.Command.RemoteDispatcher do
         :placeholder -> placeholder_backend(opts)
         :test -> test_backend(opts)
         :none -> false
+        :raise -> raise_backend(opts)
+        {:custom, backend} -> backend
         _ -> http_backend(opts)
       end
 
@@ -416,6 +418,24 @@ defmodule Kvasir.Command.RemoteDispatcher do
       @doc false
       @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
       def do_dispatch(command), do: {:ok, unquote(__MODULE__).set_relevant_timestamps(command)}
+    end
+  end
+
+  @doc false
+  @spec raise_backend(Keyword.t()) :: term
+  def raise_backend(_opts) do
+    quote do
+      @doc false
+      @spec do_dispatch(Kvasir.Command.t()) :: {:ok, Kvasir.Command.t()} | {:error, atom}
+      def do_dispatch(command)
+
+      def do_dispatch(_) do
+        require Logger
+        mod = __MODULE__ |> Module.split() |> Enum.slice(0..-2) |> Enum.join(".")
+        msg = "#{mod}: Not Configured, failed to send command."
+        Logger.error(msg)
+        raise msg
+      end
     end
   end
 
