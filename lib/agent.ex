@@ -107,6 +107,24 @@ defmodule Kvasir.Agent do
         def open(id),
           do: Supervisor.open(unquote(registry), __MODULE__, @key.partition!(id, @partitions), id)
 
+        @doc ~S"""
+        Rebuild the state of an agent based on the event source.
+
+        ## Examples
+
+        ```elixir
+        iex> rebuild(<id>)
+        :ok
+        ```
+        """
+        @spec rebuild(any) :: {:ok, pid} | {:error, atom}
+        def rebuild(id) do
+          with {:ok, key} <- @key.parse(id),
+               {:ok, instance} <- open(key) do
+            GenServer.call(instance, :rebuild)
+          end
+        end
+
         unquote(warmup)
 
         @doc ~S"""

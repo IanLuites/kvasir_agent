@@ -197,6 +197,29 @@ defmodule Kvasir.Agent.Instance do
     {:reply, state.agent_state, state}
   end
 
+  def handle_call(:rebuild, _from, state) do
+    %{source: source, cache: {cache_m, cache_i}, topic: topic, model: model, id: id} = state
+
+    Logger.debug(fn ->
+      "Agent<#{id}>: Forced State Rebuild"
+    end)
+
+    with {:ok, {offset, agent_state}} <-
+           build_state(source, topic, model, id, nil, model.base(id)) do
+      cache_m.save(cache_i, agent_state, offset)
+
+      updated_state =
+        state
+        |> Map.put(:agent_state, agent_state)
+        |> Map.put(:offset, offset)
+
+      {:reply, :ok, updated_state}
+    else
+      {:ok, {_, _, false}} -> {:reply, :ok, state}
+      err -> {:reply, err, state}
+    end
+  end
+
   defp apply_events(events, state) do
     with {:ok, new_state = %{offset: o}, updated} <- do_apply_events(events, state) do
       if updated do
