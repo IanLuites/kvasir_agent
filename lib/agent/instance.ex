@@ -110,6 +110,8 @@ defmodule Kvasir.Agent.Instance do
          do: {:ok, {a, b}}
   end
 
+  defp state_reducer(_model, err = {:error, _}, _), do: err
+
   defp state_reducer(model, event, {offset, state, true}) do
     with {:ok, updated_state} <- model.apply(state, event) do
       {:ok,
@@ -125,6 +127,8 @@ defmodule Kvasir.Agent.Instance do
       {:ok, {offset, state, false}}
     end
   end
+
+  defp state_reducer(_model, _event, err), do: err
 
   @impl GenServer
   def handle_info(
