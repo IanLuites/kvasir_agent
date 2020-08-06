@@ -106,6 +106,7 @@ defmodule Kvasir.Agent.Instance do
     with {:ok, {a, b, _}} <-
            topic
            |> source.stream(from: offset, to: :last, key: id)
+           |> Stream.filter(&is_map/1)
            |> EnumX.reduce_while(base, &state_reducer(model, &1, &2)),
          do: {:ok, {a, b}}
   end
