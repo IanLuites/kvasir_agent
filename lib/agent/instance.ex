@@ -103,14 +103,17 @@ defmodule Kvasir.Agent.Instance do
   defp build_state(source, topic, model, id, offset, original_state) do
     base = {offset || Kvasir.Offset.create(), original_state, false}
 
-    topic
-    |> source.stream(from: offset, to: :last, key: id)
-    |> EnumX.reduce_while(base, &state_reducer(model, &1, &2))
+    with {:ok, {a, b, _}} <-
+           topic
+           |> source.stream(from: offset, to: :last, key: id)
+           |> EnumX.reduce_while(base, &state_reducer(model, &1, &2)),
+         do: {:ok, {a, b}}
   end
 
   defp state_reducer(model, event, {offset, state, true}) do
     with {:ok, updated_state} <- model.apply(state, event) do
-      {:ok, {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state}}
+      {:ok,
+       {Offset.set(offset, event.__meta__.partition, event.__meta__.offset), updated_state, true}}
     end
   end
 
@@ -119,7 +122,7 @@ defmodule Kvasir.Agent.Instance do
          Offset.get(offset, event.__meta__.partition) < event.__meta__.offset do
       state_reducer(model, event, {offset, state, true})
     else
-      {:ok, {offset, state}}
+      {:ok, {offset, state, false}}
     end
   end
 
