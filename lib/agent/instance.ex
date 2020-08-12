@@ -252,7 +252,8 @@ defmodule Kvasir.Agent.Instance do
     if Offset.empty?(o) or Offset.get(o, event.__meta__.partition) < offset do
       case state.model.apply(state.agent_state, event) do
         :ok ->
-          do_apply_events(events, state, updated)
+          new_state = %{state | offset: Offset.set(state.offset, partition, offset)}
+          do_apply_events(events, new_state, updated)
 
         {:ok, updated_state} ->
           updated_offset = Offset.set(state.offset, partition, offset)
@@ -306,6 +307,8 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp add_offset_callback(state = %{callbacks: callbacks, offset: now}, l = {pid, ref}, offset) do
+    IO.inspect({now, offset}, label: "{now, target}")
+
     if Offset.compare(now, offset) == :lt do
       callbacks = Map.update(callbacks, offset, [l], &[l | &1])
 
