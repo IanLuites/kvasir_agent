@@ -307,8 +307,6 @@ defmodule Kvasir.Agent.Instance do
   end
 
   defp add_offset_callback(state = %{callbacks: callbacks, offset: now}, l = {pid, ref}, offset) do
-    IO.inspect({now, offset}, label: "{now, target}")
-
     if Offset.compare(now, offset) == :lt do
       callbacks = Map.update(callbacks, offset, [l], &[l | &1])
 
