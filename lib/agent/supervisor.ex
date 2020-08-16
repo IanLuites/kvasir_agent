@@ -1,12 +1,46 @@
 defmodule Kvasir.Agent.Supervisor do
   # use Supervisor
   alias Kvasir.Agent.PartitionSupervisor
+  require Logger
 
+  defmodule Monitor do
+    def start_link(agent) do
+      {:ok, spawn_link(__MODULE__, :monitor, [agent])}
+    end
+
+    def monitor(agent) do
+      Process.flag(:trap_exit, true)
+
+      Logger.info(fn -> "Kvasir Agents: Starting #{inspect(agent)} supervisor." end)
+
+      do_monitor(agent)
+    end
+
+    defp do_monitor(agent) do
+      receive do
+        {:EXIT, _, reason} ->
+          Logger.info(fn ->
+            "Kvasir Agents: Stopped<#{inspect(reason)}> #{inspect(agent)} supervisor."
+          end)
+
+        _ ->
+          do_monitor(agent)
+      end
+    end
+  end
+
+  @spec start_link(%{agent: any, source: any, topic: any}) :: :ignore | {:error, any} | {:ok, pid}
   def start_link(config = %{agent: agent, source: source, topic: topic}) do
     # Supervisor.start_link(__MODULE__, config, name: :"#{agent}.Supervisor")
     with {:ok, pid} <-
            DynamicSupervisor.start_link(strategy: :one_for_one, name: :"#{agent}.Supervisor") do
       partitions = source.__topics__()[topic].partitions
+
+      DynamicSupervisor.start_child(pid, %{
+        id: :monitor,
+        start: {Monitor, :start_link, [agent]},
+        type: :worker
+      })
 
       Enum.each(0..(partitions - 1), fn p ->
         DynamicSupervisor.start_child(pid, %{
