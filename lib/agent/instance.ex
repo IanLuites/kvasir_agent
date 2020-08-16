@@ -253,7 +253,7 @@ defmodule Kvasir.Agent.Instance do
       case state.model.apply(state.agent_state, event) do
         :ok ->
           new_state = %{state | offset: Offset.set(state.offset, partition, offset)}
-          do_apply_events(events, new_state, updated)
+          do_apply_events(events, new_state, true)
 
         {:ok, updated_state} ->
           updated_offset = Offset.set(state.offset, partition, offset)
