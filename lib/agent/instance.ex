@@ -84,7 +84,7 @@ defmodule Kvasir.Agent.Instance do
         {:ok, {offset, state}}
 
       {:error, :corrupted_state} ->
-        Logger.debug(fn ->
+        Logger.warn(fn ->
           "Agent<#{id}>: State Load Failed: Corrupted State"
         end)
 
@@ -95,7 +95,7 @@ defmodule Kvasir.Agent.Instance do
         end
 
       {:error, reason} ->
-        Logger.debug(fn -> "Agent<#{id}>: State Load Failed: #{reason}" end)
+        Logger.error(fn -> "Agent<#{id}>: State Load Failed: #{reason}" end)
         build_state(source, topic, model, id, nil, model.base(id))
     end
   end
