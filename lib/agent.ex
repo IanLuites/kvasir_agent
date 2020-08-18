@@ -47,6 +47,44 @@ defmodule Kvasir.Agent do
         end
       end
 
+    restore =
+      if cache do
+        quote do
+          @doc false
+          @spec check_cache_integrity(restore :: boolean) :: non_neg_integer
+          def check_cache_integrity(restore)
+
+          def check_cache_integrity(true) do
+            __MODULE__
+            |> unquote(cache).stream()
+            |> Stream.map(fn
+              {i, :corrupted_state} -> __MODULE__.open(i)
+              _ -> :skip
+            end)
+            |> Stream.reject(&(&1 == :skip))
+            |> Enum.count()
+          end
+
+          def check_cache_integrity(false) do
+            __MODULE__
+            |> unquote(cache).stream()
+            |> Stream.map(fn
+              {_, :corrupted_state} -> 1
+              _ -> 0
+            end)
+            |> Stream.reject(&(&1 == :skip))
+            |> Enum.sum()
+          end
+        end
+      else
+        quote do
+          @doc false
+          @spec check_cache_integrity(restore :: boolean) :: non_neg_integer
+          def check_cache_integrity(restore)
+          def check_cache_integrity(_), do: 0
+        end
+      end
+
     # Disabled environments
     unless ApplicationX.mix_env() in (opts[:disable] || []) do
       quote do
@@ -126,6 +164,7 @@ defmodule Kvasir.Agent do
         end
 
         unquote(warmup)
+        unquote(restore)
 
         @doc ~S"""
         Inspect the current state of an agent instance.
