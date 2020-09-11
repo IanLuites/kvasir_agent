@@ -169,6 +169,9 @@ defmodule Kvasir.Agent.Entity do
   @callback execute(state :: any, command :: map) ::
               :ok | {:ok, map} | {:ok, [map]} | {:error, atom}
 
+  @callback __encode__(term) :: {Version.t(), term}
+  @callback __decode__({Version.t(), term}) :: term
+
   defmacro __using__(opts \\ []) do
     Kvasir.Agent.Mutator.init(__CALLER__)
 
@@ -178,7 +181,33 @@ defmodule Kvasir.Agent.Entity do
       @behaviour Kvasir.Agent.Entity
       @before_compile unquote(__MODULE__)
       @__struct__ unquote(opts[:struct]) || __MODULE__
-      import Kvasir.Agent.Entity, only: [entity: 1, entity: 2]
+      use UTCDateTime
+      import Kvasir.Agent.Entity, only: [entity: 1, entity: 2, version: 1, version: 2, upgrade: 2]
+
+      Module.register_attribute(__MODULE__, :version, persist: true, accumulate: true)
+      @version {Version.parse!("1.0.0"), nil, "Create entity."}
+    end
+  end
+
+  defmacro version(version, updated \\ nil) do
+    precision = version |> String.graphemes() |> Enum.count(&(&1 == "."))
+    v = Version.parse!(version <> String.duplicate(".0", 2 - precision))
+
+    quote do
+      @version {unquote(Macro.escape(v)), unquote(updated),
+                elem(Module.delete_attribute(__MODULE__, :doc) || {0, ""}, 1)}
+    end
+  end
+
+  defmacro upgrade(version, do: block) do
+    upgrades = Module.get_attribute(__CALLER__.module, :upgrades, [])
+    func = :"__upgrade_#{Enum.count(upgrades)}"
+    Module.put_attribute(__CALLER__.module, :upgrades, [{version, func} | upgrades])
+
+    quote do
+      defp unquote(func)(unquote(Macro.var(:state, __CALLER__.context))) do
+        unquote(block)
+      end
     end
   end
 
@@ -270,6 +299,11 @@ defmodule Kvasir.Agent.Entity do
         def base(_id), do: @base
       end
 
+      @version_history Enum.sort(@version, &(Version.compare(elem(&1, 0), elem(&2, 0)) != :gt))
+      @current_version @version_history
+                       |> List.last()
+                       |> elem(0)
+
       @doc false
       @spec __entity__(atom) :: term
       def __entity__(:config),
@@ -280,10 +314,38 @@ defmodule Kvasir.Agent.Entity do
 
       def __entity__(:struct), do: @__struct__
       def __entity__(:fields), do: @struct_fields
+      def __entity__(:version), do: @current_version
+      def __entity__(:history), do: @version_history
     end
   end
 
   defmacro __before_compile__(env) do
+    alias Kvasir.Agent.Mutator
+
+    upgrades =
+      env.module
+      |> Module.get_attribute(:upgrades, [])
+      |> Enum.reduce(nil, fn {version, func}, acc ->
+        quote do
+          def upgrade(
+                %Version{
+                  major: unquote(Macro.var(:major, nil)),
+                  minor: unquote(Macro.var(:minor, nil)),
+                  patch: unquote(Macro.var(:patch, nil))
+                },
+                state
+              )
+              when unquote(Mutator.guard(version)) do
+            _ = unquote(Macro.var(:major, nil))
+            _ = unquote(Macro.var(:minor, nil))
+            _ = unquote(Macro.var(:patch, nil))
+            unquote(func)(state)
+          end
+
+          unquote(acc)
+        end
+      end)
+
     quote do
       @doc false
       @impl Kvasir.Agent.Entity
@@ -294,6 +356,30 @@ defmodule Kvasir.Agent.Entity do
       @impl Kvasir.Agent.Entity
       @spec execute(term, term) :: :ok | {:ok, map} | {:ok, [map]} | {:error, atom}
       unquote(Kvasir.Agent.Mutator.gen_exec(env))
+
+      @doc false
+      @impl Kvasir.Agent.Entity
+      @spec __encode__(term) :: {Version.t(), term}
+      unquote(Kvasir.Agent.Mutator.gen_encode(env))
+
+      @doc false
+      @impl Kvasir.Agent.Entity
+      @spec __decode__({Version.t(), term}) :: term
+      unquote(Kvasir.Agent.Mutator.gen_decode(env))
+
+      @doc ~S"""
+      Upgrade entity state from older to current version.
+
+      ## Examples
+
+      ```elixir
+      iex> upgrade(#Version<1.0.0>, %Entity{...})
+      ```
+      """
+      @spec upgrade(Version.t(), map) :: {:ok, map} | {:error, atom}
+      def upgrade(version, state)
+      unquote(upgrades)
+      def upgrade(_, state), do: {:ok, state}
     end
   end
 end

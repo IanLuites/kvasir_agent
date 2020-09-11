@@ -85,7 +85,35 @@ defmodule Kvasir.Agent.ObjectValue do
       @before_compile unquote(__MODULE__)
       @behaviour Kvasir.Agent.ObjectValue
       @__struct__ unquote(opts[:struct]) || __MODULE__
-      import Kvasir.Agent.ObjectValue, only: [object_value: 1, object_value: 2]
+      use UTCDateTime
+
+      import Kvasir.Agent.ObjectValue,
+        only: [object_value: 1, object_value: 2, version: 1, version: 2, upgrade: 2]
+
+      Module.register_attribute(__MODULE__, :version, persist: true, accumulate: true)
+      @version {Version.parse!("1.0.0"), nil, "Create entity."}
+    end
+  end
+
+  defmacro version(version, updated \\ nil) do
+    precision = version |> String.graphemes() |> Enum.count(&(&1 == "."))
+    v = Version.parse!(version <> String.duplicate(".0", 2 - precision))
+
+    quote do
+      @version {unquote(Macro.escape(v)), unquote(updated),
+                elem(Module.delete_attribute(__MODULE__, :doc) || {0, ""}, 1)}
+    end
+  end
+
+  defmacro upgrade(version, do: block) do
+    upgrades = Module.get_attribute(__CALLER__.module, :upgrades, [])
+    func = :"__upgrade_#{Enum.count(upgrades)}"
+    Module.put_attribute(__CALLER__.module, :upgrades, [{version, func} | upgrades])
+
+    quote do
+      defp unquote(func)(unquote(Macro.var(:state, __CALLER__.context))) do
+        unquote(block)
+      end
     end
   end
 
@@ -163,6 +191,32 @@ defmodule Kvasir.Agent.ObjectValue do
   end
 
   defmacro __before_compile__(env) do
+    alias Kvasir.Agent.Mutator
+
+    upgrades =
+      env.module
+      |> Module.get_attribute(:upgrades, [])
+      |> Enum.reduce(nil, fn {version, func}, acc ->
+        quote do
+          def upgrade(
+                %Version{
+                  major: unquote(Macro.var(:major, nil)),
+                  minor: unquote(Macro.var(:minor, nil)),
+                  patch: unquote(Macro.var(:patch, nil))
+                },
+                state
+              )
+              when unquote(Mutator.guard(version)) do
+            _ = unquote(Macro.var(:major, nil))
+            _ = unquote(Macro.var(:minor, nil))
+            _ = unquote(Macro.var(:patch, nil))
+            unquote(func)(state)
+          end
+
+          unquote(acc)
+        end
+      end)
+
     quote do
       unless unquote(Module.get_attribute(env.module, :manual)) do
         @doc false
@@ -195,6 +249,19 @@ defmodule Kvasir.Agent.ObjectValue do
       end
 
       @doc false
+      @spec __encode__(term) :: {Version.t(), term}
+      unquote(Kvasir.Agent.Mutator.gen_encode(env))
+
+      @doc false
+      @spec __decode__({Version.t(), term}) :: term
+      unquote(Kvasir.Agent.Mutator.gen_decode(env))
+
+      @version_history Enum.sort(@version, &(Version.compare(elem(&1, 0), elem(&2, 0)) != :gt))
+      @current_version @version_history
+                       |> List.last()
+                       |> elem(0)
+
+      @doc false
       @spec __object_value__(atom) :: term
       def __object_value__(:config),
         do: %{
@@ -206,6 +273,8 @@ defmodule Kvasir.Agent.ObjectValue do
 
       def __object_value__(:struct), do: @__struct__
       def __object_value__(:fields), do: @struct_fields
+      def __object_value__(:version), do: @current_version
+      def __object_value__(:history), do: @version_history
 
       def __object_value__(:events) do
         unquote(Macro.escape(Mutator.events(env)))
@@ -226,6 +295,20 @@ defmodule Kvasir.Agent.ObjectValue do
       def __object_value__(:collectors) do
         unquote(Macro.escape(Mutator.collectors(env)))
       end
+
+      @doc ~S"""
+      Upgrade object value state from older to current version.
+
+      ## Examples
+
+      ```elixir
+      iex> upgrade(#Version<1.0.0>, %ObjectValue{...})
+      ```
+      """
+      @spec upgrade(Version.t(), map) :: {:ok, map} | {:error, atom}
+      def upgrade(version, state)
+      unquote(upgrades)
+      def upgrade(_, state), do: {:ok, state}
     end
   end
 end

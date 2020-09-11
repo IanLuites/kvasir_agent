@@ -17,17 +17,20 @@ defmodule Kvasir.Agent.Instance do
   end
 
   def pre_start_agent(agent, partition, id, offset, state, cache, opts \\ []) do
-    config =
-      :config
-      |> agent.__agent__()
-      |> Map.put(:id, id)
-      |> Map.put(:partition, partition)
-      |> Map.put(:agent_state, state)
-      |> Map.put(:offset, offset)
-      |> Map.put(:cache, cache)
-      |> Map.put(:callbacks, %{})
+    config = %{model: m} = agent.__agent__(:config)
 
-    GenServer.start_link(__MODULE__, {:preload, config}, opts)
+    with {:ok, s} <- m.__decode__(state) do
+      c =
+        config
+        |> Map.put(:id, id)
+        |> Map.put(:partition, partition)
+        |> Map.put(:agent_state, s)
+        |> Map.put(:offset, offset)
+        |> Map.put(:cache, cache)
+        |> Map.put(:callbacks, %{})
+
+      GenServer.start_link(__MODULE__, {:preload, c}, opts)
+    end
   end
 
   @impl GenServer
@@ -81,7 +84,7 @@ defmodule Kvasir.Agent.Instance do
       {:ok, offset, state} ->
         Logger.debug(fn -> "Agent<#{id}>: State Loaded: #{inspect(offset)}" end)
         # build_state(source, topic, model, id, offset, state)
-        {:ok, {offset, state}}
+        with {:ok, s} <- model.__decode__(state), do: {:ok, {offset, s}}
 
       {:error, :corrupted_state} ->
         Logger.warn(fn ->

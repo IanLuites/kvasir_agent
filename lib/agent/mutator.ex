@@ -298,6 +298,135 @@ defmodule Kvasir.Agent.Mutator do
 
   ### Execution Generation ###
 
+  @version1 Version.parse!("1.0.0")
+
+  def gen_encode(env) do
+    [{current_version, _, _} | _] = Module.get_attribute(env.module, :version)
+    object_values = object_values(env)
+    entities = entities(env)
+    versioned = object_values ++ entities
+
+    if versioned == [] do
+      quote do
+        def __encode__(state)
+        def __encode__(state), do: {unquote(Macro.escape(current_version)), state}
+      end
+    else
+      unwrap =
+        {:=, [],
+         [
+           {:_s, [], Elixir},
+           {:%{}, [], Enum.map(versioned, fn {v, _} -> {v, {v, [], Elixir}} end)}
+         ]}
+
+      wrap =
+        {:%{}, [],
+         [
+           {:|, [],
+            [
+              {:_s, [], Elixir},
+              Enum.map(object_values, fn {v, m} ->
+                {v,
+                 {{:., [], [{:__aliases__, [alias: false], [m]}, :__encode__]}, [],
+                  [{v, [], Elixir}]}}
+              end) ++
+                Enum.map(entities, fn {v, m} ->
+                  {v,
+                   {{:., [],
+                     [
+                       {:__aliases__, [alias: false], [unquote(__MODULE__)]},
+                       :__multi_entity_encode__
+                     ]}, [], [m, {v, [], Elixir}]}}
+                end)
+            ]}
+         ]}
+
+      quote do
+        def __encode__(state)
+
+        def __encode__(unquote(unwrap)),
+          do: {unquote(Macro.escape(current_version)), unquote(wrap)}
+      end
+    end
+  end
+
+  def __multi_entity_encode__(module, states) do
+    {module.__entity__(:version),
+     Map.new(states, fn {k, v} ->
+       {_, vv} = module.__encode__(v)
+       {k, vv}
+     end)}
+  end
+
+  def gen_decode(env) do
+    [{current_version, _, _} | _] = Module.get_attribute(env.module, :version)
+    object_values = object_values(env)
+    entities = entities(env)
+    versioned = object_values ++ entities
+
+    if versioned == [] do
+      quote do
+        def __decode__(state)
+        def __decode__({unquote(Macro.escape(current_version)), state}), do: {:ok, state}
+        def __decode__({version, state}), do: unquote(env.module).upgrade(version, state)
+        def __decode__(state), do: __decode__({unquote(Macro.escape(@version1)), state})
+      end
+    else
+      state = {:_s, [], Elixir}
+
+      ov =
+        Enum.reduce(object_values, state, fn {v, m}, acc ->
+          quote do
+            case unquote(acc) do
+              acc = %{unquote(v) => v} ->
+                {:ok, vv} = unquote(m).__decode__(v)
+                %{acc | unquote(v) => vv}
+
+              s ->
+                s
+            end
+          end
+        end)
+
+      en =
+        Enum.reduce(entities, ov, fn {v, m}, acc ->
+          quote do
+            case unquote(acc) do
+              acc = %{unquote(v) => v} ->
+                vv = unquote(__MODULE__).__multi_entity_decode__(unquote(m), v)
+                %{acc | unquote(v) => vv}
+
+              s ->
+                s
+            end
+          end
+        end)
+
+      quote do
+        def __decode__(state)
+
+        def __decode__({unquote(Macro.escape(current_version)), unquote(state)}),
+          do: {:ok, unquote(en)}
+
+        def __decode__({version, unquote(state)}),
+          do: unquote(env.module).upgrade(version, unquote(en))
+
+        def __decode__(state), do: __decode__({unquote(Macro.escape(@version1)), state})
+      end
+    end
+  end
+
+  def __multi_entity_decode__(module, {version, states}) do
+    Map.new(states, fn {k, v} ->
+      {:ok, v} = module.__decode__(version, v)
+      {k, v}
+    end)
+  end
+
+  def __multi_entity_decode__(module, states) do
+    __multi_entity_decode__(module, {@version1, states})
+  end
+
   def gen_exec(env) do
     generate_execution(
       creation(env),
@@ -660,5 +789,147 @@ defmodule Kvasir.Agent.Mutator do
 
   defmacro execute(command, state, opts, block) do
     add_execute(__CALLER__, command, state, block, opts)
+  end
+
+  ### Guard ###
+
+  def guard(version) do
+    version
+    |> Version.Parser.lexer([])
+    |> to_guard(nil)
+  end
+
+  @major Macro.var(:major, nil)
+  @minor Macro.var(:minor, nil)
+  @patch Macro.var(:patch, nil)
+
+  defp to_guard([], acc), do: acc
+  defp to_guard([:|| | rest], acc), do: guard_or(acc, to_guard(rest, nil))
+  defp to_guard([:&& | rest], acc), do: guard_and(acc, to_guard(rest, nil))
+
+  defp to_guard([a, b | rest], _acc), do: to_guard(rest, condition(a, b))
+
+  defp condition(:==, version) do
+    version
+    |> parse_parts()
+    |> Enum.reduce(nil, fn {k, v}, acc ->
+      guard_and(acc, quote(do: unquote(Macro.var(k, nil)) == unquote(v)))
+    end)
+  end
+
+  defp condition(:~>, version) do
+    case parse_version(version) do
+      [_] -> condition(:>=, version)
+      [a, _] -> guard_and(condition(:>=, version), condition(:<, "#{a + 1}.0"))
+      [a, b, _] -> guard_and(condition(:>=, version), condition(:<, "#{a}.#{b + 1}.0"))
+    end
+  end
+
+  defp condition(:>, version) do
+    case parse_version(version) do
+      [a] ->
+        quote do: unquote() > unquote(a)
+
+      [a, b] ->
+        quote do:
+                unquote(@major) > unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) > unquote(b))
+
+      [a, b, c] ->
+        quote do:
+                unquote(@major) > unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) > unquote(b)) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) == unquote(b) and
+                     unquote(@patch) > unquote(c))
+    end
+  end
+
+  defp condition(:>=, version) do
+    case parse_version(version) do
+      [a] ->
+        quote do: unquote(@major) >= unquote(a)
+
+      [a, b] ->
+        quote do:
+                unquote(@major) > unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) >= unquote(b))
+
+      [a, b, c] ->
+        quote do:
+                unquote(@major) > unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) > unquote(b)) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) == unquote(b) and
+                     unquote(@patch) >= unquote(c))
+    end
+  end
+
+  defp condition(:<, version) do
+    case parse_version(version) do
+      [a] ->
+        quote do: unquote(@major) < unquote(a)
+
+      [a, b] ->
+        quote do:
+                unquote(@major) < unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) < unquote(b))
+
+      [a, b, c] ->
+        quote do:
+                unquote(@major) < unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) < unquote(b)) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) == unquote(b) and
+                     unquote(@patch) < unquote(c))
+    end
+  end
+
+  defp condition(:<=, version) do
+    case parse_version(version) do
+      [a] ->
+        quote do: unquote(@major) <= unquote(a)
+
+      [a, b] ->
+        quote do:
+                unquote(@major) < unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) <= unquote(b))
+
+      [a, b, c] ->
+        quote do:
+                unquote(@major) < unquote(a) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) < unquote(b)) or
+                  (unquote(@major) == unquote(a) and unquote(@minor) == unquote(b) and
+                     unquote(@patch) <= unquote(c))
+    end
+  end
+
+  defp guard_and(a, nil), do: a
+  defp guard_and(nil, b), do: b
+
+  defp guard_and(a, b) do
+    quote do: unquote(a) and unquote(b)
+  end
+
+  defp guard_or(a, nil), do: a
+  defp guard_or(nil, b), do: b
+
+  defp guard_or(a, b) do
+    quote do: unquote(a) or unquote(b)
+  end
+
+  defp parse_version(version) do
+    case String.split(version, ".") do
+      [] -> :error
+      [a] -> [String.to_integer(a)]
+      [a, b] -> [String.to_integer(a), String.to_integer(b)]
+      [a, b, c | _] -> [String.to_integer(a), String.to_integer(b), String.to_integer(c)]
+    end
+  end
+
+  defp parse_parts(version) do
+    case parse_version(version) do
+      [] -> :error
+      [a] -> [major: a]
+      [a, b] -> [major: a, minor: b]
+      [a, b, c | _] -> [major: a, minor: b, patch: c]
+    end
   end
 end
