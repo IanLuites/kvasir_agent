@@ -93,7 +93,7 @@ defmodule Kvasir.Agent.Instance do
 
         with r = {:ok, {offset, agent_state}} <-
                build_state(source, topic, model, id, nil, model.base(id)) do
-          cache_m.save(cache_i, agent_state, offset)
+          cache_m.save(cache_i, model.__encode__(agent_state), offset)
           r
         end
 
@@ -217,7 +217,7 @@ defmodule Kvasir.Agent.Instance do
 
     with {:ok, {offset, agent_state}} <-
            build_state(source, topic, model, id, nil, model.base(id)) do
-      cache_m.save(cache_i, agent_state, offset)
+      cache_m.save(cache_i, model.__encode__(agent_state), offset)
 
       updated_state =
         state
@@ -234,8 +234,8 @@ defmodule Kvasir.Agent.Instance do
   defp apply_events(events, state) do
     with {:ok, new_state = %{offset: o}, updated} <- do_apply_events(events, state) do
       if updated do
-        {cache_m, cache_i} = state.cache
-        :ok = cache_m.save(cache_i, new_state.agent_state, o)
+        %{cache: {cache_m, cache_i}, model: model, agent_state: agent_state} = new_state
+        :ok = cache_m.save(cache_i, model.__encode__(agent_state), o)
       end
 
       notify_offset_callbacks(new_state, o)
