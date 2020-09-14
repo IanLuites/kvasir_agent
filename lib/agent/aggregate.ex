@@ -8,6 +8,9 @@ defmodule Kvasir.Agent.Aggregate do
   @callback execute(state :: any, command :: map) ::
               :ok | {:ok, map} | {:ok, [map]} | {:error, atom}
 
+  @callback __encode__(term) :: {Version.t(), term}
+  @callback __decode__({Version.t(), term}) :: term
+
   defmacro __using__(opts \\ []) do
     root = opts[:root]
     key = opts[:key]
@@ -29,6 +32,16 @@ defmodule Kvasir.Agent.Aggregate do
       @impl Kvasir.Agent.Aggregate
       @spec execute(term, term) :: :ok | {:ok, map} | {:ok, [map]} | {:error, atom}
       defdelegate execute(state, command), to: unquote(root)
+
+      @doc false
+      @impl Kvasir.Agent.Aggregate
+      @spec __encode__(term) :: {Version.t(), term}
+      defdelegate __encode__(state), to: unquote(root)
+
+      @doc false
+      @impl Kvasir.Agent.Aggregate
+      @spec __decode__({Version.t(), term}) :: term
+      defdelegate __decode__(state), to: unquote(root)
 
       @doc false
       @spec __aggregate__(atom) :: term
