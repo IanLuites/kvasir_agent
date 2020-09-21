@@ -18,6 +18,18 @@ defmodule Kvasir.Command.RemoteDispatcher.Multi do
         ])
       end
     end
+
+    defimpl Jason.Encoder, for: __MODULE__ do
+      def encode(%Kvasir.Command.RemoteDispatcher.Multi.Result{succeeded: s, failed: f}, opts) do
+        Jason.Encode.map(
+          %{
+            succeeded: s,
+            failed: Enum.map(f, fn {k, v} -> %{command: k, result: inspect(v)} end)
+          },
+          opts
+        )
+      end
+    end
   end
 
   @type t :: %__MODULE__{}
